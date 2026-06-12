@@ -34,13 +34,23 @@ impl Default for AppConfig {
 }
 
 pub fn get_config_path() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home)
-            .join(".config")
-            .join("dbdqueue")
-            .join("config.toml")
+    if cfg!(windows) {
+        if let Ok(appdata) = std::env::var("APPDATA") {
+            PathBuf::from(appdata).join("dbdqueue").join("config.toml")
+        } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            PathBuf::from(userprofile).join(".config").join("dbdqueue").join("config.toml")
+        } else {
+            PathBuf::from("config.toml")
+        }
     } else {
-        PathBuf::from("config.toml")
+        if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home)
+                .join(".config")
+                .join("dbdqueue")
+                .join("config.toml")
+        } else {
+            PathBuf::from("config.toml")
+        }
     }
 }
 

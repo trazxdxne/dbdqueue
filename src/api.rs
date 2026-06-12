@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use regex::Regex;
-
-pub const GROUP1: &str = "eu-central-1,eu-west-1,eu-west-2,us-east-1,us-east-2,us-west-1,us-west-2,ca-central-1,sa-east-1";
-pub const GROUP2: &str = "ap-south-1,ap-east-1,ap-northeast-1,ap-northeast-2,ap-southeast-1,ap-southeast-2";
+use serde::Deserialize;
 
 pub fn get_api_to_aws() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
@@ -42,6 +40,26 @@ pub fn get_aws_to_api() -> HashMap<&'static str, &'static str> {
     m
 }
 
+pub fn get_aws_to_flag() -> HashMap<&'static str, &'static str> {
+    let mut m = HashMap::new();
+    m.insert("eu-central-1", "🇩🇪");
+    m.insert("eu-west-1", "🇮🇪");
+    m.insert("eu-west-2", "🇬🇧");
+    m.insert("us-east-1", "🇺🇸");
+    m.insert("us-east-2", "🇺🇸");
+    m.insert("us-west-1", "🇺🇸");
+    m.insert("us-west-2", "🇺🇸");
+    m.insert("ca-central-1", "🇨🇦");
+    m.insert("sa-east-1", "🇧🇷");
+    m.insert("ap-south-1", "🇮🇳");
+    m.insert("ap-east-1", "🇭🇰");
+    m.insert("ap-northeast-1", "🇯🇵");
+    m.insert("ap-northeast-2", "🇰🇷");
+    m.insert("ap-southeast-1", "🇸🇬");
+    m.insert("ap-southeast-2", "🇦🇺");
+    m
+}
+
 #[derive(Debug, Clone)]
 pub struct RegionQueueData {
     pub flag: String,
@@ -49,12 +67,6 @@ pub struct RegionQueueData {
     pub mode: String, // "Standard" or "Event"
     pub survivor: String,
     pub killer: String,
-}
-
-pub fn clean_region_name(raw_name: &str) -> String {
-    let re = Regex::new(r"[^\w\s]+").unwrap();
-    let cleaned = re.replace_all(raw_name, "");
-    cleaned.replace("Event", "").trim().to_string()
 }
 
 pub fn parse_time_to_seconds(time_str: &str) -> u32 {
@@ -80,115 +92,94 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
     999999
 }
 
-pub fn fetch_queue_times() -> Result<Vec<RegionQueueData>, String> {
-    let mut responses = Vec::new();
-    
-    for group in &[GROUP1, GROUP2] {
-        let url = format!(
-            "https://api.deadbyqueue.com/queuetime?region={}&mode=live,live-event&extras=flag,regionname",
-            group
-        );
-        let resp = ureq::get(&url)
-            .set("User-Agent", "curl/8.7.1")
-            .set("Accept", "*/*")
-            .call()
-            .map_err(|e| format!("Error fetching data: {}", e))?;
-            
-        let body = resp.into_string()
-            .map_err(|e| format!("Error reading response: {}", e))?;
-        responses.push(body);
-    }
-    
-    let combined = responses.join(" | ");
-    Ok(parse_api_response(&combined))
+#[derive(Deserialize, Debug)]
+struct QueueTime {
+    time: String,
 }
 
-pub fn parse_api_response(text: &str) -> Vec<RegionQueueData> {
-    let mut data = Vec::new();
-    let re_main = Regex::new(
-        r"^(.*?)\s+([^\s]+)\s*/\s*([^\s,]+)(?:,\s*Event:\s*([^\s]+)\s*/\s*([^\s]+))?$"
-    ).unwrap();
-    let re_emoji = Regex::new(r"^([^\w\s]+)\s*(.*)$").unwrap();
-    
-    for part in text.split('|') {
-        let part_trimmed = part.trim();
-        if part_trimmed.is_empty() {
-            continue;
-        }
-        
-        if let Some(caps) = re_main.captures(part_trimmed) {
-            let flag_and_name = caps.get(1).map_or("", |m| m.as_str()).trim();
-            let k_std = caps.get(2).map_or("—", |m| m.as_str()).to_string();
-            let s_std = caps.get(3).map_or("—", |m| m.as_str()).to_string();
-            let k_ev = caps.get(4).map(|m| m.as_str().to_string());
-            let s_ev = caps.get(5).map(|m| m.as_str().to_string());
-            
-            let (flag, name) = if let Some(em_caps) = re_emoji.captures(flag_and_name) {
-                (
-                    em_caps.get(1).map_or("", |m| m.as_str()).to_string(),
-                    em_caps.get(2).map_or("", |m| m.as_str()).to_string(),
-                )
+#[derive(Deserialize, Debug)]
+struct QueueData {
+    killer: Option<QueueTime>,
+    survivor: Option<QueueTime>,
+}
+
+#[derive(Deserialize, Debug)]
+struct Api2Response {
+    lastupdated: String,
+    queues: HashMap<String, HashMap<String, QueueData>>,
+}
+
+pub fn format_seconds_to_time(seconds_str: &str) -> String {
+    if let Ok(sec) = seconds_str.parse::<u32>() {
+        if sec == 0 {
+            "—".to_string()
+        } else if sec < 60 {
+            format!("{}s", sec)
+        } else {
+            let m = sec / 60;
+            let s = sec % 60;
+            if s > 0 {
+                format!("{}m{}s", m, s)
             } else {
-                ("".to_string(), flag_and_name.to_string())
-            };
-            
-            let name_clean = clean_region_name(&name);
-            
-            data.push(RegionQueueData {
-                flag: flag.clone(),
-                name: name_clean.clone(),
-                mode: "Standard".to_string(),
-                survivor: s_std,
-                killer: k_std,
-            });
-            
-            if let (Some(ke), Some(se)) = (k_ev, s_ev) {
+                format!("{}m", m)
+            }
+        }
+    } else {
+        "—".to_string()
+    }
+}
+
+pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, String), String> {
+    let url = "https://api2.deadbyqueue.com/queues";
+    let resp = ureq::get(url)
+        .set("User-Agent", "curl/8.7.1")
+        .set("Accept", "*/*")
+        .call()
+        .map_err(|e| format!("Error fetching data: {}", e))?;
+        
+    let body = resp.into_string()
+        .map_err(|e| format!("Error reading response: {}", e))?;
+        
+    let api_data: Api2Response = serde_json::from_str(&body)
+        .map_err(|e| format!("Error parsing JSON: {}", e))?;
+        
+    let aws_to_api = get_aws_to_api();
+    let aws_to_flag = get_aws_to_flag();
+    let all_regions = get_all_aws_regions();
+    
+    let mut data = Vec::new();
+    
+    for mode_name in &["Standard", "Event"] {
+        let json_mode_key = if *mode_name == "Standard" { "live" } else { "live-event" };
+        if let Some(mode_queues) = api_data.queues.get(json_mode_key) {
+            for reg in &all_regions {
+                let name = aws_to_api.get(reg).unwrap_or(reg).to_string();
+                let flag = aws_to_flag.get(reg).unwrap_or(&"").to_string();
+                
+                let (survivor, killer) = if let Some(q_data) = mode_queues.get(*reg) {
+                    let s_time = q_data.survivor.as_ref()
+                        .map(|t| format_seconds_to_time(&t.time))
+                        .unwrap_or_else(|| "—".to_string());
+                    let k_time = q_data.killer.as_ref()
+                        .map(|t| format_seconds_to_time(&t.time))
+                        .unwrap_or_else(|| "—".to_string());
+                    (s_time, k_time)
+                } else {
+                    ("—".to_string(), "—".to_string())
+                };
+                
                 data.push(RegionQueueData {
                     flag,
-                    name: name_clean,
-                    mode: "Event".to_string(),
-                    survivor: se,
-                    killer: ke,
+                    name,
+                    mode: mode_name.to_string(),
+                    survivor,
+                    killer,
                 });
             }
-        } else {
-            // Handle offline or differently formatted parts
-            let (flag, name) = if let Some(em_caps) = re_emoji.captures(part_trimmed) {
-                (
-                    em_caps.get(1).map_or("", |m| m.as_str()).to_string(),
-                    em_caps.get(2).map_or("", |m| m.as_str()).to_string(),
-                )
-            } else {
-                ("".to_string(), part_trimmed.to_string())
-            };
-            
-            // Clean the name of offline flags
-            let name_clean = name
-                .replace("❌", "")
-                .replace("Offline", "")
-                .replace(",", "")
-                .replace("Event:", "");
-            let name_clean = clean_region_name(&name_clean);
-            
-            data.push(RegionQueueData {
-                flag: flag.clone(),
-                name: name_clean.clone(),
-                mode: "Standard".to_string(),
-                survivor: "—".to_string(),
-                killer: "—".to_string(),
-            });
-            
-            data.push(RegionQueueData {
-                flag,
-                name: name_clean,
-                mode: "Event".to_string(),
-                survivor: "—".to_string(),
-                killer: "—".to_string(),
-            });
         }
     }
     
-    data
+    Ok((data, api_data.lastupdated))
 }
 
 #[cfg(test)]
@@ -205,34 +196,45 @@ mod tests {
     }
 
     #[test]
-    fn test_clean_name() {
-        assert_eq!(clean_region_name("🇩🇪 Frankfurt"), "Frankfurt");
-        assert_eq!(clean_region_name(" São Paulo  "), "São Paulo");
-        assert_eq!(clean_region_name("Montréal Event"), "Montréal");
+    fn test_format_seconds() {
+        assert_eq!(format_seconds_to_time("5"), "5s");
+        assert_eq!(format_seconds_to_time("180"), "3m");
+        assert_eq!(format_seconds_to_time("207"), "3m27s");
+        assert_eq!(format_seconds_to_time("0"), "—");
+        assert_eq!(format_seconds_to_time("invalid"), "—");
     }
 
     #[test]
-    fn test_parse_response() {
-        let sample = "🇩🇪 Frankfurt 3m27s / 5s, Event: 5m32s / 12s | 🇮🇪 Dublin 4m3s / 6s | ❌ London Offline";
-        let parsed = parse_api_response(sample);
+    fn test_parse_json_response() {
+        let sample = r#"{
+            "lastupdated": "2026-06-12 17:55:43",
+            "lastupdated2": 1781286943,
+            "queues": {
+                "live": {
+                    "eu-central-1": {
+                        "killer": { "time": "207" },
+                        "survivor": { "time": "5" }
+                    },
+                    "eu-west-1": {
+                        "killer": { "time": "243" },
+                        "survivor": { "time": "6" }
+                    }
+                },
+                "live-event": {
+                    "eu-central-1": {
+                        "killer": { "time": "332" },
+                        "survivor": { "time": "12" }
+                    }
+                }
+            }
+        }"#;
         
-        assert!(parsed.len() >= 4);
+        let api_data: Api2Response = serde_json::from_str(sample).unwrap();
+        assert_eq!(api_data.lastupdated, "2026-06-12 17:55:43");
         
-        let frank_std = parsed.iter().find(|r| r.name == "Frankfurt" && r.mode == "Standard").unwrap();
-        assert_eq!(frank_std.killer, "3m27s");
-        assert_eq!(frank_std.survivor, "5s");
-        
-        let frank_ev = parsed.iter().find(|r| r.name == "Frankfurt" && r.mode == "Event").unwrap();
-        assert_eq!(frank_ev.killer, "5m32s");
-        assert_eq!(frank_ev.survivor, "12s");
-
-        let dub_std = parsed.iter().find(|r| r.name == "Dublin" && r.mode == "Standard").unwrap();
-        assert_eq!(dub_std.killer, "4m3s");
-        assert_eq!(dub_std.survivor, "6s");
-        
-        let lon_std = parsed.iter().find(|r| r.name == "London" && r.mode == "Standard").unwrap();
-        assert_eq!(lon_std.killer, "—");
-        assert_eq!(lon_std.survivor, "—");
+        let live_queues = api_data.queues.get("live").unwrap();
+        let frank_live = live_queues.get("eu-central-1").unwrap();
+        assert_eq!(frank_live.killer.as_ref().unwrap().time, "207");
+        assert_eq!(frank_live.survivor.as_ref().unwrap().time, "5");
     }
 }
-

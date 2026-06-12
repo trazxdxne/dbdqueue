@@ -193,8 +193,8 @@ fn main() {
     }
     
     // Default action: fetch and print queue times
-    let mut data = match api::fetch_queue_times() {
-        Ok(d) => d,
+    let (mut data, api_last_updated) = match api::fetch_queue_times() {
+        Ok((d, t)) => (d, t),
         Err(e) => {
             eprintln!("\x1b[91m{}\x1b[0m", e);
             process::exit(1);
@@ -241,7 +241,7 @@ fn main() {
     all_rows.extend(other_rows);
     
     if !all_rows.is_empty() {
-        ui::draw_table(&all_rows, priority_names);
+        ui::draw_table(&all_rows, priority_names, &api_last_updated);
     }
 }
 

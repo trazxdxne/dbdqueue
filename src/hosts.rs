@@ -6,6 +6,10 @@ use crate::api::get_all_aws_regions;
 
 const START_BLOCK: &str = "# --- DBD REGION CHANGER START ---";
 const END_BLOCK: &str = "# --- DBD REGION CHANGER END ---";
+
+#[cfg(windows)]
+pub const HOSTS_PATH: &str = "C:\\Windows\\System32\\drivers\\etc\\hosts";
+#[cfg(not(windows))]
 pub const HOSTS_PATH: &str = "/etc/hosts";
 
 pub fn build_hosts_content(hosts_path: &Path, selected_aws_regions: Option<&[String]>) -> Result<String, std::io::Error> {
@@ -74,6 +78,69 @@ pub fn build_hosts_content(hosts_path: &Path, selected_aws_regions: Option<&[Str
     Ok(result)
 }
 
+#[cfg(windows)]
+pub fn update_hosts(selected_aws_regions: Option<&[String]>) {
+    let hosts_path = Path::new(HOSTS_PATH);
+    let new_content = match build_hosts_content(hosts_path, selected_aws_regions) {
+        Ok(content) => content,
+        Err(e) => {
+            eprintln!("\x1b[91mError generating hosts file content:\x1b[0m {}", e);
+            return;
+        }
+    };
+
+    let current_content = fs::read_to_string(hosts_path).unwrap_or_default();
+    if current_content == new_content {
+        println!("\x1b[92mHosts file is already up to date.\x1b[0m");
+        return;
+    }
+
+    // Try to write directly (succeeds if running as Administrator)
+    if fs::write(hosts_path, &new_content).is_ok() {
+        println!("\x1b[92mSuccessfully updated region locks!\x1b[0m");
+        flush_dns_cache();
+        return;
+    }
+
+    // If writing fails, write to a temp file in AppConfig directory first
+    println!("\x1b[93mRequesting Administrator access to write to hosts file...\x1b[0m");
+    let config_path = crate::config::get_config_path();
+    let temp_path = config_path.with_file_name("hosts.tmp");
+    if let Some(parent) = temp_path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+
+    if let Err(e) = fs::write(&temp_path, &new_content) {
+        eprintln!("\x1b[91mFailed to create temporary hosts file:\x1b[0m {}", e);
+        return;
+    }
+
+    // Trigger elevated PowerShell script to copy the hosts file over
+    let ps_cmd = format!(
+        "Start-Process powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', 'Copy-Item -Path \"{}\" -Destination \"{}\" -Force' -Verb RunAs -Wait",
+        temp_path.to_string_lossy(),
+        HOSTS_PATH
+    );
+
+    let status = Command::new("powershell")
+        .args(["-NoProfile", "-Command", &ps_cmd])
+        .status();
+
+    // Clean up temp file
+    let _ = fs::remove_file(&temp_path);
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("\x1b[92mSuccessfully updated region locks!\x1b[0m");
+            flush_dns_cache();
+        }
+        _ => {
+            eprintln!("\x1b[91mFailed to update hosts file: elevation denied or failed.\x1b[0m");
+        }
+    }
+}
+
+#[cfg(not(windows))]
 pub fn update_hosts(selected_aws_regions: Option<&[String]>) {
     let hosts_path = Path::new(HOSTS_PATH);
     let new_content = match build_hosts_content(hosts_path, selected_aws_regions) {
@@ -132,21 +199,32 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>) {
 }
 
 fn flush_dns_cache() {
-    let res = Command::new("resolvectl")
-        .arg("flush-caches")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
-        
-    if res.is_ok() {
-        return;
+    #[cfg(windows)]
+    {
+        let _ = Command::new("ipconfig")
+            .arg("/flushdns")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
     }
-    
-    let _ = Command::new("systemd-resolve")
-        .arg("--flush-caches")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    #[cfg(not(windows))]
+    {
+        let res = Command::new("resolvectl")
+            .arg("flush-caches")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+            
+        if res.is_ok() {
+            return;
+        }
+        
+        let _ = Command::new("systemd-resolve")
+            .arg("--flush-caches")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 #[cfg(test)]
@@ -180,4 +258,3 @@ mod tests {
         let _ = fs::remove_file(test_file_path);
     }
 }
-

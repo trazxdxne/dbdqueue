@@ -11,16 +11,22 @@ permissions:
 jobs:
   build:
     name: Build - ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             output_name: dbdqueue-linux-x86_64
+            os: ubuntu-latest
             use_cross: false
           - target: aarch64-unknown-linux-gnu
             output_name: dbdqueue-linux-aarch64
+            os: ubuntu-latest
             use_cross: true
+          - target: x86_64-pc-windows-msvc
+            output_name: dbdqueue-windows-x64.exe
+            os: windows-latest
+            use_cross: false
 
     steps:
       - name: Checkout source code
@@ -36,6 +42,7 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
 
       - name: Build binary
+        shell: bash
         run: |
           if [ "${{ matrix.use_cross }}" = "true" ]; then
             cross build --release --target ${{ matrix.target }}
@@ -44,8 +51,13 @@ jobs:
           fi
 
       - name: Prepare asset
+        shell: bash
         run: |
-          cp target/${{ matrix.target }}/release/dbdqueue ${{ matrix.output_name }}
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp target/${{ matrix.target }}/release/dbdqueue.exe ${{ matrix.output_name }}
+          else
+            cp target/${{ matrix.target }}/release/dbdqueue ${{ matrix.output_name }}
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -70,6 +82,7 @@ jobs:
         run: |
           mv artifacts/dbdqueue-linux-x86_64/dbdqueue-linux-x86_64 .
           mv artifacts/dbdqueue-linux-aarch64/dbdqueue-linux-aarch64 .
+          mv artifacts/dbdqueue-windows-x64.exe/dbdqueue-windows-x64.exe .
 
       - name: Generate Changelog
         id: changelog
@@ -81,6 +94,7 @@ jobs:
           echo "- Local configuration file support (~/.config/dbdqueue/config.toml) for custom priorities" >> release_notes.md
           echo "- Region lock whitelisting via /etc/hosts modification using `pkexec` for security" >> release_notes.md
           echo "- Intuitive, interactive CLI select menus using raw keyboard events" >> release_notes.md
+          echo "- Cross-platform compatibility: Full native Windows support!" >> release_notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -88,6 +102,7 @@ jobs:
           files: |
             dbdqueue-linux-x86_64
             dbdqueue-linux-aarch64
+            dbdqueue-windows-x64.exe
           body_path: release_notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

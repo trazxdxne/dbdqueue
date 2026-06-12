@@ -53,7 +53,7 @@ pub fn colorize_time(time_str: &str) -> String {
     }
 }
 
-pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String]) {
+pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_updated: &str) {
     let col_width_region = 22;
     let col_width_mode = 10;
     let col_width_surv = 10;
@@ -126,7 +126,7 @@ pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String]) {
     }
     println!("{}", border_bot);
     let local_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    println!("{}Last updated: {}{}", C_GRAY, local_time, C_RESET);
+    println!("{}API Last updated: {} (Checked local time: {}){}", C_GRAY, api_last_updated, local_time, C_RESET);
 }
 
 
@@ -149,17 +149,17 @@ fn run_interactive_menu(
     
     loop {
         write!(stdout, "\x1b[H\x1b[2J").ok();
-        writeln!(stdout, "{}{}{}{}", C_BOLD, C_CYAN, title, C_RESET).ok();
-        writeln!(stdout, "{}\n", instructions).ok();
+        write!(stdout, "{}{}{}{}\r\n", C_BOLD, C_CYAN, title, C_RESET).ok();
+        write!(stdout, "{}\r\n\r\n", instructions).ok();
         
         for (i, (display, code)) in options.iter().enumerate() {
             let checked = if selected[i] { "[*]" } else { "[ ]" };
             let color = if selected[i] { C_GREEN } else { C_GRAY };
             
             if i == cursor_pos {
-                writeln!(stdout, " \x1b[7m {} {} ({}) \x1b[27m", checked, display, code).ok();
+                write!(stdout, " \x1b[7m {} {} ({}) \x1b[27m\r\n", checked, display, code).ok();
             } else {
-                writeln!(stdout, " {} {} {} ({}){}", color, checked, display, code, C_RESET).ok();
+                write!(stdout, " {} {} {} ({}){}\r\n", color, checked, display, code, C_RESET).ok();
             }
         }
         stdout.flush().ok();
@@ -180,7 +180,7 @@ fn run_interactive_menu(
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     disable_raw_mode().ok();
-                    write!(stdout, "\x1b[?25h\n\x1b[93mCancelled.\x1b[0m\n").ok();
+                    write!(stdout, "\x1b[?25h\r\n\x1b[93mCancelled.\x1b[0m\r\n").ok();
                     stdout.flush().ok();
                     return None;
                 }
