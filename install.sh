@@ -38,11 +38,11 @@ esac
 
 # 3. Get latest release version
 echo "${BLUE}==>${NC} Checking latest version from GitHub..."
-LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep -oP '"tag_name": "\K[^"]+')
+LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep -oP '"tag_name": "\K[^"]+' || true)
 
 if [ -z "$LATEST_RELEASE" ]; then
     # Fallback to scraping releases if GitHub API limits are hit
-    LATEST_RELEASE=$(curl -s "https://github.com/$REPO/releases" | grep -oP 'releases/tag/\K[a-zA-Z0-9.-]+' | head -n 1)
+    LATEST_RELEASE=$(curl -s "https://github.com/$REPO/releases" | grep -oP 'releases/tag/\K[a-zA-Z0-9.-]+' | head -n 1 || true)
 fi
 
 if [ -z "$LATEST_RELEASE" ]; then
