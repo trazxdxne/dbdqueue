@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build - ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            output_name: dbdqueue-linux-x86_64
+            use_cross: false
+          - target: aarch64-unknown-linux-gnu
+            output_name: dbdqueue-linux-aarch64
+            use_cross: true
+
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Cross
+        if: matrix.use_cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build binary
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Prepare asset
+        run: |
+          cp target/${{ matrix.target }}/release/dbdqueue ${{ matrix.output_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output_name }}
+          path: ${{ matrix.output_name }}
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Move artifacts to root
+        run: |
+          mv artifacts/dbdqueue-linux-x86_64/dbdqueue-linux-x86_64 .
+          mv artifacts/dbdqueue-linux-aarch64/dbdqueue-linux-aarch64 .
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          echo "## Dead by Daylight Queue Times & Region Locker CLI" > release_notes.md
+          echo "### Features in this release:" >> release_notes.md
+          echo "- Live Dead by Daylight queue times directly in terminal with ANSI colors" >> release_notes.md
+          echo "- Dynamic sorting options (by killer, survivor, priority, or region name)" >> release_notes.md
+          echo "- Local configuration file support (~/.config/dbdqueue/config.toml) for custom priorities" >> release_notes.md
+          echo "- Region lock whitelisting via /etc/hosts modification using `pkexec` for security" >> release_notes.md
+          echo "- Intuitive, interactive CLI select menus using raw keyboard events" >> release_notes.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dbdqueue-linux-x86_64
+            dbdqueue-linux-aarch64
+          body_path: release_notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
