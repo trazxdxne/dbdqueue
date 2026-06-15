@@ -83,7 +83,45 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
                 }
             };
             
-            script.push_str("ipset restore <<-EOF\n");
+            let v4_elements = v4.join(",\n            ");
+            let v6_elements = v6.join(",\n            ");
+            
+            script.push_str("if command -v nft &>/dev/null; then\n");
+            script.push_str("    nft delete table inet dbdqueue 2>/dev/null\n");
+            script.push_str("    cat << 'EOF' > /tmp/dbdqueue_nft.conf\n");
+            script.push_str("table inet dbdqueue {\n");
+            script.push_str("    set blocked_ips {\n");
+            script.push_str("        type ipv4_addr\n");
+            script.push_str("        flags interval\n");
+            script.push_str("        auto-merge\n");
+            if !v4_elements.is_empty() {
+                script.push_str("        elements = {\n");
+                script.push_str(&format!("            {}\n", v4_elements));
+                script.push_str("        }\n");
+            }
+            script.push_str("    }\n");
+            script.push_str("    set blocked_ips_v6 {\n");
+            script.push_str("        type ipv6_addr\n");
+            script.push_str("        flags interval\n");
+            script.push_str("        auto-merge\n");
+            if !v6_elements.is_empty() {
+                script.push_str("        elements = {\n");
+                script.push_str(&format!("            {}\n", v6_elements));
+                script.push_str("        }\n");
+            }
+            script.push_str("    }\n");
+            script.push_str("    chain output {\n");
+            script.push_str("        type filter hook output priority filter - 10; policy accept;\n");
+            script.push_str("        ip daddr @blocked_ips reject\n");
+            script.push_str("        ip6 daddr @blocked_ips_v6 reject\n");
+            script.push_str("    }\n");
+            script.push_str("}\n");
+            script.push_str("EOF\n");
+            script.push_str("    nft -f /tmp/dbdqueue_nft.conf\n");
+            script.push_str("    rm -f /tmp/dbdqueue_nft.conf\n");
+            script.push_str("else\n");
+            
+            script.push_str("    ipset restore <<'EOF'\n");
             script.push_str("create dbdqueue_block hash:net -exist\n");
             script.push_str("flush dbdqueue_block\n");
             for ip in v4 {
@@ -94,17 +132,21 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
             for ip in v6 {
                 script.push_str(&format!("add dbdqueue_block_v6 {}\n", ip));
             }
-            script.push_str("EOF\n\n");
+            script.push_str("EOF\n");
             
             // Apply new rules restricting ALL traffic to block game traffic/pings over TCP as well
-            script.push_str("iptables -I OUTPUT -m set --match-set dbdqueue_block dst -j REJECT\n");
-            script.push_str("ip6tables -I OUTPUT -m set --match-set dbdqueue_block_v6 dst -j REJECT\n");
+            script.push_str("    iptables -I OUTPUT -m set --match-set dbdqueue_block dst -j REJECT\n");
+            script.push_str("    ip6tables -I OUTPUT -m set --match-set dbdqueue_block_v6 dst -j REJECT\n");
+            script.push_str("fi\n");
             
-            println!("\x1b[93mRequesting elevated privileges to apply firewall rules (iptables/ipset)...\x1b[0m");
+            println!("\x1b[93mRequesting elevated privileges to apply firewall rules...\x1b[0m");
         }
         _ => {
             script.push_str("ipset destroy dbdqueue_block 2>/dev/null\n");
             script.push_str("ipset destroy dbdqueue_block_v6 2>/dev/null\n");
+            script.push_str("if command -v nft &>/dev/null; then\n");
+            script.push_str("    nft delete table inet dbdqueue 2>/dev/null\n");
+            script.push_str("fi\n");
             println!("\x1b[93mRequesting elevated privileges to clear firewall rules...\x1b[0m");
         }
     }
