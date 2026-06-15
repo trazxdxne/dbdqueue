@@ -241,7 +241,7 @@ fn main() {
     all_rows.extend(other_rows);
     
     if !all_rows.is_empty() {
-        ui::draw_table(&all_rows, priority_names, &api_last_updated);
+        ui::draw_table(&all_rows, priority_names, api_last_updated);
     }
 }
 

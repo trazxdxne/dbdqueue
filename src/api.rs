@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use regex::Regex;
 use serde::Deserialize;
-use chrono::TimeZone;
 
 pub fn get_api_to_aws() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
@@ -106,7 +105,6 @@ struct QueueData {
 
 #[derive(Deserialize, Debug)]
 struct Api2Response {
-    lastupdated: String,
     lastupdated2: i64,
     queues: HashMap<String, HashMap<String, QueueData>>,
 }
@@ -131,7 +129,7 @@ pub fn format_seconds_to_time(seconds_str: &str) -> String {
     }
 }
 
-pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, String), String> {
+pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
     let url = "https://api2.deadbyqueue.com/queues";
     let resp = ureq::get(url)
         .set("User-Agent", "curl/8.7.1")
@@ -181,20 +179,7 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, String), String> {
         }
     }
     
-    let diff = chrono::Utc::now().timestamp() - api_data.lastupdated2;
-    let relative_time = if diff < 60 {
-        format!("{} seconds ago", diff.max(0))
-    } else if diff < 3600 {
-        format!("{} minutes ago", diff / 60)
-    } else {
-        format!("{} hours ago", diff / 3600)
-    };
-    
-    let local_dt = chrono::Local.timestamp_opt(api_data.lastupdated2, 0).unwrap();
-    let local_time_str = local_dt.format("%Y-%m-%d %H:%M:%S").to_string();
-    let final_updated_str = format!("{} ({})", local_time_str, relative_time);
-    
-    Ok((data, final_updated_str))
+    Ok((data, api_data.lastupdated2))
 }
 
 #[cfg(test)]
@@ -245,7 +230,7 @@ mod tests {
         }"#;
         
         let api_data: Api2Response = serde_json::from_str(sample).unwrap();
-        assert_eq!(api_data.lastupdated, "2026-06-12 17:55:43");
+        assert_eq!(api_data.lastupdated2, 1781286943);
         
         let live_queues = api_data.queues.get("live").unwrap();
         let frank_live = live_queues.get("eu-central-1").unwrap();

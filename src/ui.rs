@@ -53,7 +53,7 @@ pub fn colorize_time(time_str: &str) -> String {
     }
 }
 
-pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_updated: &str) {
+pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_updated: i64) {
     let col_width_region = 22;
     let col_width_mode = 10;
     let col_width_surv = 10;
@@ -125,7 +125,21 @@ pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_u
         }
     }
     println!("{}", border_bot);
-    println!("{}API Last updated: {}{}", C_GRAY, api_last_updated, C_RESET);
+    
+    let now = chrono::Utc::now().timestamp();
+    let diff = now - api_last_updated;
+    let time_str = if diff < 60 {
+        "только что".to_string()
+    } else if diff < 3600 {
+        let mins = diff / 60;
+        format!("{} мин. назад", mins)
+    } else {
+        let hours = diff / 3600;
+        let mins = (diff % 3600) / 60;
+        format!("{} ч. {} мин. назад", hours, mins)
+    };
+    
+    println!("{}Обновлено: {}{}", C_GRAY, time_str, C_RESET);
 }
 
 
