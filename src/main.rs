@@ -1,6 +1,6 @@
 mod config;
 mod api;
-mod hosts;
+
 mod firewall;
 mod ui;
 

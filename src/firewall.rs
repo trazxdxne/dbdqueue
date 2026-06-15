@@ -140,6 +140,6 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
 }
 
 #[cfg(windows)]
-pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
-    crate::hosts::update_hosts(selected_aws_regions);
+pub fn update_firewall(_selected_aws_regions: Option<&[String]>) {
+    eprintln!("\x1b[91mWindows firewall region lock is not yet implemented in this version.\x1b[0m");
 }
