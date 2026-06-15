@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-06-15
+
+### Fixed
+- Fixed an issue with the 0.3.0 release where several modified files (like `README.md`, `install.sh`, `src/tui.rs`, etc.) were not included in the git commit, resulting in a broken release build. This patch deploys all remaining files from the major refactor.
+
 ## [0.3.0] - 2026-06-15
 
 ### Added

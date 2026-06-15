@@ -1,11 +1,11 @@
 mod config;
 mod api;
-
-mod ui;
+mod app;
+mod tui;
 
 use clap::Parser;
 use std::process;
-use crate::api::RegionQueueData;
+use crate::app::App;
 use crate::config::{get_config_path, load_config, save_config, migrate_json_if_needed};
 
 #[derive(Parser)]
@@ -18,7 +18,7 @@ struct Cli {
     #[arg(short, long, value_parser = ["standard", "event", "both"], help = "Filter rows by Mode")]
     mode: Option<String>,
 
-    #[arg(short, long, num_args = 0.., help = "Set priority regions in config (comma or space separated, leave empty for interactive menu)")]
+    #[arg(short, long, num_args = 0.., help = "Set priority regions in config (comma or space separated)")]
     priority: Option<Vec<String>>,
 }
 
@@ -116,78 +116,40 @@ fn main() {
     if let Some(ref s) = args.sort {
         config.sort = s.clone();
         config_changed = true;
-        println!("\x1b[92mDefault sorting set to:\x1b[0m {}", s);
+    }
+    
+    if let Some(ref m) = args.mode {
+        config.mode = m.clone();
+        config_changed = true;
     }
     
     if let Some(ref p) = args.priority {
-        let priorities = if p.is_empty() {
-            match ui::interactive_priority_menu(&config.priority) {
-                Some(prio) => prio,
-                None => process::exit(0),
-            }
-        } else {
-            parse_priority_input(p)
-        };
+        let priorities = parse_priority_input(p);
         config.priority = priorities.clone();
         config_changed = true;
-        println!("\x1b[92mUpdated priority list to:\x1b[0m {}", priorities.join(", "));
     }
     
     if config_changed
         && let Err(e) = save_config(&config_path, &config) {
-            eprintln!("\x1b[91mFailed to save config:\x1b[0m {}", e);
+            eprintln!("Failed to save config: {}", e);
         }
     
-    // Default action: fetch and print queue times
-    let (mut data, api_last_updated) = match api::fetch_queue_times() {
-        Ok((d, t)) => (d, t),
-        Err(e) => {
-            eprintln!("\x1b[91m{}\x1b[0m", e);
-            process::exit(1);
-        }
-    };
+    let active_sort = args.sort.unwrap_or(config.sort);
+    let active_mode = args.mode.unwrap_or(config.mode);
+    let active_priority = config.priority;
     
-    // Filter by mode
-    let active_mode = args.mode.as_ref().unwrap_or(&config.mode);
-    if active_mode == "standard" {
-        data.retain(|r| r.mode == "Standard");
-    } else if active_mode == "event" {
-        data.retain(|r| r.mode == "Event");
+    let mut app = App::new(active_sort, active_mode, active_priority);
+    
+    // Initial fetch to show data immediately
+    if let Ok((queues, updated)) = api::fetch_queue_times() {
+        app.queues = queues;
+        app.api_last_updated = updated;
+        app.is_fetching = false;
     }
     
-    // Split into priority and other lists
-    let priority_names = &config.priority;
-    let mut priority_rows: Vec<RegionQueueData> = data.iter()
-        .filter(|r| priority_names.contains(&r.name))
-        .cloned()
-        .collect();
-    let mut other_rows: Vec<RegionQueueData> = data.iter()
-        .filter(|r| !priority_names.contains(&r.name))
-        .cloned()
-        .collect();
-        
-    // Apply sorting
-    let active_sort = &config.sort;
-    if active_sort == "survivor" {
-        priority_rows.sort_by_key(|r| api::parse_time_to_seconds(&r.survivor));
-        other_rows.sort_by_key(|r| api::parse_time_to_seconds(&r.survivor));
-    } else if active_sort == "killer" {
-        priority_rows.sort_by_key(|r| api::parse_time_to_seconds(&r.killer));
-        other_rows.sort_by_key(|r| api::parse_time_to_seconds(&r.killer));
-    } else if active_sort == "priority" {
-        priority_rows.sort_by_key(|r| priority_names.iter().position(|name| name == &r.name).unwrap_or(usize::MAX));
-        other_rows.sort_by_key(|r| r.name.clone());
-    } else {
-        // default
-        priority_rows.sort_by_key(|r| r.name.clone());
-        other_rows.sort_by_key(|r| r.name.clone());
-    }
-    
-    let mut all_rows = priority_rows;
-    all_rows.extend(other_rows);
-    
-    if !all_rows.is_empty() {
-        ui::draw_table(&all_rows, priority_names, api_last_updated);
+    if let Err(e) = tui::run_app(app) {
+        eprintln!("Error running TUI: {}", e);
+        process::exit(1);
     }
 }
 
@@ -210,4 +172,3 @@ mod tests {
         assert_eq!(parsed3, vec!["Virginia", "Frankfurt"]);
     }
 }
-

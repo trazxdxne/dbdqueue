@@ -17,7 +17,7 @@ fn default_sort() -> String {
 }
 
 fn default_mode() -> String {
-    "both".to_string()
+    "standard".to_string()
 }
 
 impl Default for AppConfig {
@@ -94,7 +94,7 @@ mod tests {
         
         let config = load_config(test_path);
         assert_eq!(config.sort, "default");
-        assert_eq!(config.mode, "both");
+        assert_eq!(config.mode, "standard");
         assert!(config.priority.is_empty());
         
         let new_config = AppConfig {

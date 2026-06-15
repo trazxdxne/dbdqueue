@@ -17,7 +17,7 @@ echo "${BLUE}==>${NC} Installing dbdqueue..."
 # 1. Detect OS
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 if [ "$OS" != "linux" ]; then
-    echo "${RED}Error:${NC} dbdqueue is currently only supported on Linux (for region-locking features)."
+    echo "${RED}Error:${NC} dbdqueue installation via this script is currently only supported on Linux/macOS."
     exit 1
 fi
 
