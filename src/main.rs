@@ -1,18 +1,16 @@
 mod config;
 mod api;
 
-mod firewall;
 mod ui;
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use std::process;
-use crate::api::{RegionQueueData, get_api_to_aws};
+use crate::api::RegionQueueData;
 use crate::config::{get_config_path, load_config, save_config, migrate_json_if_needed};
-use crate::firewall::update_firewall;
 
 #[derive(Parser)]
 #[command(name = "dbdqueue")]
-#[command(about = "Dead by Daylight Queue Times & Region Locker CLI", long_about = None)]
+#[command(about = "Dead by Daylight Queue Times CLI", long_about = None)]
 struct Cli {
     #[arg(short, long, value_parser = ["survivor", "killer", "priority", "default"], help = "Sort output by column/rules (persists in config)")]
     sort: Option<String>,
@@ -22,20 +20,6 @@ struct Cli {
 
     #[arg(short, long, num_args = 0.., help = "Set priority regions in config (comma or space separated, leave empty for interactive menu)")]
     priority: Option<Vec<String>>,
-
-    #[command(subcommand)]
-    command: Option<Commands>,
-}
-
-#[derive(Subcommand)]
-enum Commands {
-    #[command(about = "Lock regions (blocking all others)")]
-    Lock {
-        #[arg(num_args = 0.., help = "Regions to whitelist (leave empty for interactive menu)")]
-        regions: Vec<String>,
-    },
-    #[command(about = "Unlock all regions")]
-    Unlock,
 }
 
 pub fn parse_priority_input(words_list: &[String]) -> Vec<String> {
@@ -153,45 +137,6 @@ fn main() {
         && let Err(e) = save_config(&config_path, &config) {
             eprintln!("\x1b[91mFailed to save config:\x1b[0m {}", e);
         }
-    
-    // Process subcommands
-    if let Some(ref cmd) = args.command {
-        match cmd {
-            Commands::Lock { regions } => {
-                let resolved_regions = if regions.is_empty() {
-                    match ui::interactive_lock_menu(&config.locked) {
-                        Some(regs) => regs,
-                        None => process::exit(0),
-                    }
-                } else {
-                    let mut resolved = Vec::new();
-                    let api_to_aws = get_api_to_aws();
-                    let input_resolved = parse_priority_input(regions);
-                    for r in input_resolved {
-                        if let Some(aws_code) = api_to_aws.get(r.as_str()) {
-                            resolved.push(aws_code.to_string());
-                        }
-                    }
-                    resolved
-                };
-                
-                config.locked = resolved_regions.clone();
-                if let Err(e) = save_config(&config_path, &config) {
-                    eprintln!("\x1b[91mFailed to save config:\x1b[0m {}", e);
-                }
-                update_firewall(Some(&resolved_regions));
-                process::exit(0);
-            }
-            Commands::Unlock => {
-                config.locked = vec![];
-                if let Err(e) = save_config(&config_path, &config) {
-                    eprintln!("\x1b[91mFailed to save config:\x1b[0m {}", e);
-                }
-                update_firewall(None);
-                process::exit(0);
-            }
-        }
-    }
     
     // Default action: fetch and print queue times
     let (mut data, api_last_updated) = match api::fetch_queue_times() {

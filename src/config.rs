@@ -6,8 +6,6 @@ use std::path::{Path, PathBuf};
 pub struct AppConfig {
     #[serde(default)]
     pub priority: Vec<String>,
-    #[serde(default)]
-    pub locked: Vec<String>,
     #[serde(default = "default_sort")]
     pub sort: String,
     #[serde(default = "default_mode")]
@@ -26,7 +24,6 @@ impl Default for AppConfig {
     fn default() -> Self {
         AppConfig {
             priority: vec![],
-            locked: vec![],
             sort: default_sort(),
             mode: default_mode(),
         }
@@ -99,7 +96,6 @@ mod tests {
         assert_eq!(config.sort, "default");
         assert_eq!(config.mode, "both");
         assert!(config.priority.is_empty());
-        assert!(config.locked.is_empty());
         
         let new_config = AppConfig {
             sort: "survivor".to_string(),
@@ -127,7 +123,6 @@ mod tests {
         
         let json_content = r#"{
             "priority": ["Virginia"],
-            "locked": ["us-east-1"],
             "sort": "killer",
             "mode": "standard"
         }"#;
@@ -142,7 +137,6 @@ mod tests {
         assert_eq!(loaded.sort, "killer");
         assert_eq!(loaded.mode, "standard");
         assert_eq!(loaded.priority, vec!["Virginia"]);
-        assert_eq!(loaded.locked, vec!["us-east-1"]);
         
         let _ = fs::remove_file(toml_path);
     }

@@ -249,27 +249,6 @@ fn run_interactive_menu(
     Some(result)
 }
 
-pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
-    let api_to_aws = crate::api::get_api_to_aws();
-    let mut regions: Vec<String> = api_to_aws.keys().map(|s| s.to_string()).collect();
-    regions.sort();
-    
-    let options: Vec<(String, String)> = regions.iter()
-        .map(|r| (r.clone(), api_to_aws.get(r.as_str()).unwrap().to_string()))
-        .collect();
-        
-    let is_ru = is_russian();
-    let title = if is_ru { "=== DBD Блокировка Регионов (Интерактивный Режим) ===" } else { "=== DBD Region Locker (Interactive Mode) ===" };
-    let instructions = if is_ru { "Навигация: СТРЕЛКИ | Переключить: ПРОБЕЛ | Сохранить: ENTER | Выход: Ctrl+C" } else { "Navigate: ARROWS | Toggle: SPACE | Lock & Save: ENTER | Quit: Ctrl+C" };
-        
-    run_interactive_menu(
-        title,
-        &options,
-        current_locked,
-        instructions,
-    )
-}
-
 pub fn interactive_priority_menu(current_priority: &[String]) -> Option<Vec<String>> {
     let api_to_aws = crate::api::get_api_to_aws();
     let mut regions: Vec<String> = api_to_aws.keys().map(|s| s.to_string()).collect();
