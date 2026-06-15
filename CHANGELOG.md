@@ -21,6 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Localized the API update timestamp display to Russian and formatted it as a relative time (e.g., "Обновлено: X мин. назад").
 
+## [0.1.2] - 2026-06-15
+
+### Fixed
+- Updated domain block IP strategy from `0.0.0.0` to `127.0.0.1` and fixed related tests.
+
+## [0.1.1] - 2026-06-15
+
+### Fixed
+- Fixed interactive TUI alignment issues and added Windows compatibility enhancements.
+
 ## [0.1.0] - 2026-06-12
 
 ### Added
