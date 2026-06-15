@@ -66,7 +66,7 @@ pub fn build_hosts_content(hosts_path: &Path, selected_aws_regions: Option<&[Str
                         format!("gamelift-ping.{}.amazonaws.com", reg),
                         format!("gamelift.{}.amazonaws.com", reg),
                     ] {
-                        result.push_str(&format!("127.0.0.1 {}\n::1 {}\n", ep, ep));
+                        result.push_str(&format!("0.0.0.0 {}\n:: {}\n", ep, ep));
                     }
                 }
             }
@@ -248,7 +248,7 @@ mod tests {
         assert!(!content.contains("gamelift-ping.eu-central-1.api.aws"));
         assert!(!content.contains("gamelift-ping.eu-west-1.api.aws"));
         
-        assert!(content.contains("127.0.0.1 gamelift-ping.us-east-1.api.aws"));
+        assert!(content.contains("0.0.0.0 gamelift-ping.us-east-1.api.aws"));
         
         let unlocked_content = build_hosts_content(test_file_path, None).unwrap();
         assert!(unlocked_content.contains("127.0.0.1 localhost"));
