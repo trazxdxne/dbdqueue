@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use regex::Regex;
 use serde::Deserialize;
+use chrono::TimeZone;
 
 pub fn get_api_to_aws() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
@@ -106,6 +107,7 @@ struct QueueData {
 #[derive(Deserialize, Debug)]
 struct Api2Response {
     lastupdated: String,
+    lastupdated2: i64,
     queues: HashMap<String, HashMap<String, QueueData>>,
 }
 
@@ -179,7 +181,20 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, String), String> {
         }
     }
     
-    Ok((data, api_data.lastupdated))
+    let diff = chrono::Utc::now().timestamp() - api_data.lastupdated2;
+    let relative_time = if diff < 60 {
+        format!("{} seconds ago", diff.max(0))
+    } else if diff < 3600 {
+        format!("{} minutes ago", diff / 60)
+    } else {
+        format!("{} hours ago", diff / 3600)
+    };
+    
+    let local_dt = chrono::Local.timestamp_opt(api_data.lastupdated2, 0).unwrap();
+    let local_time_str = local_dt.format("%Y-%m-%d %H:%M:%S").to_string();
+    let final_updated_str = format!("{} ({})", local_time_str, relative_time);
+    
+    Ok((data, final_updated_str))
 }
 
 #[cfg(test)]

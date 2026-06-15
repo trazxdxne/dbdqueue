@@ -215,7 +215,7 @@ def build_hosts_content(selected_aws_regions):
                     f"gamelift-ping.{reg}.amazonaws.com",
                     f"gamelift.{reg}.amazonaws.com",
                 ]:
-                    new_lines.append(f"0.0.0.0 {ep}\n::1 {ep}\n")
+                    new_lines.append(f"127.0.0.1 {ep}\n::1 {ep}\n")
         new_lines.append(END + "\n")
 
     return "".join(new_lines)

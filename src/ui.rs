@@ -125,8 +125,7 @@ pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_u
         }
     }
     println!("{}", border_bot);
-    let local_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    println!("{}API Last updated: {} (Checked local time: {}){}", C_GRAY, api_last_updated, local_time, C_RESET);
+    println!("{}API Last updated: {}{}", C_GRAY, api_last_updated, C_RESET);
 }
 
 
@@ -144,11 +143,10 @@ fn run_interactive_menu(
     enable_raw_mode().ok()?;
     
     // Hide cursor and clear screen
-    write!(stdout, "\x1b[?25l\x1b[H\x1b[2J").ok();
-    stdout.flush().ok();
+    crossterm::execute!(stdout, crossterm::cursor::Hide, crossterm::terminal::Clear(crossterm::terminal::ClearType::All)).ok();
     
     loop {
-        write!(stdout, "\x1b[H\x1b[2J").ok();
+        crossterm::execute!(stdout, crossterm::cursor::MoveTo(0,0), crossterm::terminal::Clear(crossterm::terminal::ClearType::All)).ok();
         write!(stdout, "{}{}{}{}\r\n", C_BOLD, C_CYAN, title, C_RESET).ok();
         write!(stdout, "{}\r\n\r\n", instructions).ok();
         
@@ -180,7 +178,8 @@ fn run_interactive_menu(
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
                     disable_raw_mode().ok();
-                    write!(stdout, "\x1b[?25h\r\n\x1b[93mCancelled.\x1b[0m\r\n").ok();
+                    crossterm::execute!(stdout, crossterm::cursor::Show).ok();
+                    write!(stdout, "\r\n\x1b[93mCancelled.\x1b[0m\r\n").ok();
                     stdout.flush().ok();
                     return None;
                 }
@@ -190,7 +189,7 @@ fn run_interactive_menu(
     }
     
     disable_raw_mode().ok();
-    write!(stdout, "\x1b[?25h").ok();
+    crossterm::execute!(stdout, crossterm::cursor::Show).ok();
     stdout.flush().ok();
     
     let result = options.iter().enumerate()
