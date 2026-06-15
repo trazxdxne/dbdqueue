@@ -1,13 +1,14 @@
 mod config;
 mod api;
 mod hosts;
+mod firewall;
 mod ui;
 
 use clap::{Parser, Subcommand};
 use std::process;
 use crate::api::{RegionQueueData, get_api_to_aws};
 use crate::config::{get_config_path, load_config, save_config, migrate_json_if_needed};
-use crate::hosts::update_hosts;
+use crate::firewall::update_firewall;
 
 #[derive(Parser)]
 #[command(name = "dbdqueue")]
@@ -178,7 +179,7 @@ fn main() {
                 if let Err(e) = save_config(&config_path, &config) {
                     eprintln!("\x1b[91mFailed to save config:\x1b[0m {}", e);
                 }
-                update_hosts(Some(&resolved_regions));
+                update_firewall(Some(&resolved_regions));
                 process::exit(0);
             }
             Commands::Unlock => {
@@ -186,7 +187,7 @@ fn main() {
                 if let Err(e) = save_config(&config_path, &config) {
                     eprintln!("\x1b[91mFailed to save config:\x1b[0m {}", e);
                 }
-                update_hosts(None);
+                update_firewall(None);
                 process::exit(0);
             }
         }
