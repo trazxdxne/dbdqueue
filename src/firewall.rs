@@ -19,6 +19,71 @@ struct AwsIpv6Prefix {
     region: String,
 }
 
+#[derive(Deserialize)]
+struct SteamSdrConfig {
+    pops: std::collections::HashMap<String, SteamPop>,
+}
+
+#[derive(Deserialize)]
+struct SteamPop {
+    relays: Option<Vec<SteamRelay>>,
+}
+
+#[derive(Deserialize)]
+struct SteamRelay {
+    ipv4: String,
+}
+
+fn get_aws_to_sdr_map() -> std::collections::HashMap<&'static str, Vec<&'static str>> {
+    let mut m = std::collections::HashMap::new();
+    m.insert("us-east-1", vec!["iad", "atl"]);
+    m.insert("us-east-2", vec!["ord", "dfw"]);
+    m.insert("us-west-1", vec!["lax"]);
+    m.insert("us-west-2", vec!["sea", "eat"]);
+    m.insert("ca-central-1", vec!["ord", "iad"]);
+    m.insert("eu-central-1", vec!["fra", "fsn", "vie", "waw"]);
+    m.insert("eu-west-1", vec!["ams", "hel", "sto", "sto2"]);
+    m.insert("eu-west-2", vec!["lhr", "par", "mad"]);
+    m.insert("sa-east-1", vec!["gru", "eze", "lim", "scl"]);
+    m.insert("ap-south-1", vec!["bom2", "maa2", "dxb"]);
+    m.insert("ap-east-1", vec!["hkg"]);
+    m.insert("ap-northeast-1", vec!["tyo"]);
+    m.insert("ap-northeast-2", vec!["seo"]);
+    m.insert("ap-southeast-1", vec!["sgp", "jnb"]);
+    m.insert("ap-southeast-2", vec!["syd"]);
+    m
+}
+
+fn fetch_steam_sdr_ranges(allowed_pops: &[String]) -> Result<Vec<String>, String> {
+    let url = "https://api.steampowered.com/ISteamApps/GetSDRConfig/v1/?appid=381210";
+    let resp = ureq::get(url)
+        .set("User-Agent", "curl/8.7.1")
+        .call()
+        .map_err(|e| e.to_string())?;
+
+    let body = resp.into_string().map_err(|e| e.to_string())?;
+    let sdr_data: SteamSdrConfig = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    
+    let mut blocked_ips = Vec::new();
+    for (pop_code, pop) in sdr_data.pops {
+        if !allowed_pops.contains(&pop_code) {
+            if let Some(relays) = pop.relays {
+                for relay in relays {
+                    if let Some(pos) = relay.ipv4.rfind('.') {
+                        let subnet = format!("{}.0/24", &relay.ipv4[..pos]);
+                        blocked_ips.push(subnet);
+                    }
+                }
+            }
+        }
+    }
+    
+    blocked_ips.sort();
+    blocked_ips.dedup();
+    
+    Ok(blocked_ips)
+}
+
 fn fetch_aws_ip_ranges(regions_to_block: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
     let url = "https://ip-ranges.amazonaws.com/ip-ranges.json";
     let resp = ureq::get(url)
@@ -75,13 +140,38 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
                 }
             }
             
-            let (v4, v6) = match fetch_aws_ip_ranges(&regions_to_block) {
+            let (mut v4, v6) = match fetch_aws_ip_ranges(&regions_to_block) {
                 Ok(data) => data,
                 Err(e) => {
                     eprintln!("\x1b[91mFailed to fetch AWS IPs:\x1b[0m {}", e);
                     return;
                 }
             };
+            
+            // Collect allowed POP codes
+            let aws_to_sdr = get_aws_to_sdr_map();
+            let mut allowed_pops = Vec::new();
+            for reg in selected {
+                if let Some(sdr_pops) = aws_to_sdr.get(reg.as_str()) {
+                    for pop in sdr_pops {
+                        allowed_pops.push(pop.to_string());
+                    }
+                }
+            }
+            
+            println!("\x1b[94mFetching Steam SDR configuration...\x1b[0m");
+            let sdr_subnets = match fetch_steam_sdr_ranges(&allowed_pops) {
+                Ok(data) => data,
+                Err(e) => {
+                    eprintln!("\x1b[91mFailed to fetch Steam SDR config:\x1b[0m {}", e);
+                    return;
+                }
+            };
+            
+            // Append Steam SDR subnets to v4 list so they are blocked together
+            v4.extend(sdr_subnets);
+            v4.sort();
+            v4.dedup();
             
             let v4_elements = v4.join(",\n            ");
             let v6_elements = v6.join(",\n            ");
