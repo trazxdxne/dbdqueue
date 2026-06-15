@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-06-15
+
+### Added
+- Complete rewrite of the terminal user interface using `ratatui`, replacing the old interactive raw-mode menu with a full-screen, scrollable dashboard.
+- Real-time API fetching loop in the background while the TUI is active.
+- Restored automatic language detection (English/Russian) for UI elements based on system environment variables (`LANG`, `LC_ALL`, `LC_MESSAGES`) in the new TUI.
+
+### Removed
+- Removed the region locking feature (`/etc/hosts` modification via `pkexec tee`) and its interactive lock menu, simplifying the application scope to queue time monitoring.
+
 ## [0.1.5] - 2026-06-15
 
 ### Fixed
