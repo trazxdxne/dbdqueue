@@ -84,17 +84,12 @@ jobs:
           mv artifacts/dbdqueue-linux-aarch64/dbdqueue-linux-aarch64 .
           mv artifacts/dbdqueue-windows-x64.exe/dbdqueue-windows-x64.exe .
 
-      - name: Generate Changelog
+      - name: Extract Release Notes
         id: changelog
         run: |
-          echo "## Dead by Daylight Queue Times & Region Locker CLI" > release_notes.md
-          echo "### Features in this release:" >> release_notes.md
-          echo "- Live Dead by Daylight queue times directly in terminal with ANSI colors" >> release_notes.md
-          echo "- Dynamic sorting options (by killer, survivor, priority, or region name)" >> release_notes.md
-          echo "- Local configuration file support (~/.config/dbdqueue/config.toml) for custom priorities" >> release_notes.md
-          echo "- Region lock whitelisting via /etc/hosts modification using `pkexec` for security" >> release_notes.md
-          echo "- Intuitive, interactive CLI select menus using raw keyboard events" >> release_notes.md
-          echo "- Cross-platform compatibility: Full native Windows support!" >> release_notes.md
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "## Dead by Daylight Queue Times & Region Locker CLI v$VERSION" > release_notes.md
+          awk -v ver="$VERSION" '/^## \[/ { if ($0 ~ "^## \\[" ver "\\]") flag=1; else flag=0; next } flag' CHANGELOG.md >> release_notes.md
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
