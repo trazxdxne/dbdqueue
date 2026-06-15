@@ -12,6 +12,14 @@ const C_RED: &str = "\x1b[91m";
 const C_CYAN: &str = "\x1b[96m";
 const C_GRAY: &str = "\x1b[90m";
 
+fn is_russian() -> bool {
+    let lang = std::env::var("LANG").unwrap_or_default().to_lowercase();
+    let lc_all = std::env::var("LC_ALL").unwrap_or_default().to_lowercase();
+    let lc_msg = std::env::var("LC_MESSAGES").unwrap_or_default().to_lowercase();
+    
+    lang.starts_with("ru") || lc_all.starts_with("ru") || lc_msg.starts_with("ru")
+}
+
 pub fn get_terminal_width(s: &str) -> usize {
     let ansi_escape = Regex::new(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])").unwrap();
     let clean = ansi_escape.replace_all(s, "");
@@ -54,10 +62,11 @@ pub fn colorize_time(time_str: &str) -> String {
 }
 
 pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_updated: i64) {
+    let is_ru = is_russian();
     let col_width_region = 22;
     let col_width_mode = 10;
-    let col_width_surv = 10;
-    let col_width_kill = 10;
+    let col_width_surv = 12;
+    let col_width_kill = 12;
     
     let border_top = format!(
         "┌{}┬{}┬{}┬{}┐",
@@ -89,10 +98,16 @@ pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_u
     );
     
     println!("{}", border_top);
-    let r_hdr = pad_right(&format!("{}Region{}", C_BOLD, C_RESET), col_width_region);
-    let m_hdr = pad_right(&format!("{}Mode{}", C_BOLD, C_RESET), col_width_mode);
-    let s_hdr = pad_right(&format!("{}Survivor{}", C_BOLD, C_RESET), col_width_surv);
-    let k_hdr = pad_right(&format!("{}Killer{}", C_BOLD, C_RESET), col_width_kill);
+    
+    let txt_region = if is_ru { "Регион" } else { "Region" };
+    let txt_mode = if is_ru { "Режим" } else { "Mode" };
+    let txt_surv = if is_ru { "Выживший" } else { "Survivor" };
+    let txt_kill = if is_ru { "Маньяк" } else { "Killer" };
+    
+    let r_hdr = pad_right(&format!("{}{}{}", C_BOLD, txt_region, C_RESET), col_width_region);
+    let m_hdr = pad_right(&format!("{}{}{}", C_BOLD, txt_mode, C_RESET), col_width_mode);
+    let s_hdr = pad_right(&format!("{}{}{}", C_BOLD, txt_surv, C_RESET), col_width_surv);
+    let k_hdr = pad_right(&format!("{}{}{}", C_BOLD, txt_kill, C_RESET), col_width_kill);
     println!("│ {} │ {} │ {} │ {} │", r_hdr, m_hdr, s_hdr, k_hdr);
     println!("{}", border_double);
     
@@ -108,7 +123,16 @@ pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_u
         }
         
         let r_cell = pad_right(&reg_text, col_width_region);
-        let m_cell = pad_right(&row.mode, col_width_mode);
+        let mode_translated = if is_ru {
+            match row.mode.as_str() {
+                "Standard" => "Обычный",
+                "Event" => "Ивент",
+                other => other,
+            }
+        } else {
+            row.mode.as_str()
+        };
+        let m_cell = pad_right(mode_translated, col_width_mode);
         
         let s_val = colorize_time(&row.survivor);
         let k_val = colorize_time(&row.killer);
@@ -128,18 +152,29 @@ pub fn draw_table(rows: &[RegionQueueData], priority_list: &[String], api_last_u
     
     let now = chrono::Utc::now().timestamp();
     let diff = now - api_last_updated;
+    let txt_just_now = if is_ru { "только что" } else { "just now" };
+    let txt_updated = if is_ru { "Обновлено: " } else { "Updated: " };
+    
     let time_str = if diff < 60 {
-        "только что".to_string()
+        txt_just_now.to_string()
     } else if diff < 3600 {
         let mins = diff / 60;
-        format!("{} мин. назад", mins)
+        if is_ru {
+            format!("{} мин. назад", mins)
+        } else {
+            format!("{} mins ago", mins)
+        }
     } else {
         let hours = diff / 3600;
         let mins = (diff % 3600) / 60;
-        format!("{} ч. {} мин. назад", hours, mins)
+        if is_ru {
+            format!("{} ч. {} мин. назад", hours, mins)
+        } else {
+            format!("{} hrs {} mins ago", hours, mins)
+        }
     };
     
-    println!("{}Обновлено: {}{}", C_GRAY, time_str, C_RESET);
+    println!("{}{}{}{}", C_GRAY, txt_updated, time_str, C_RESET);
 }
 
 
@@ -191,9 +226,10 @@ fn run_interactive_menu(
                     break;
                 }
                 KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    let cancel_msg = if is_russian() { "\r\n\x1b[93mОтменено.\x1b[0m\r\n" } else { "\r\n\x1b[93mCancelled.\x1b[0m\r\n" };
                     disable_raw_mode().ok();
                     crossterm::execute!(stdout, crossterm::cursor::Show).ok();
-                    write!(stdout, "\r\n\x1b[93mCancelled.\x1b[0m\r\n").ok();
+                    write!(stdout, "{}", cancel_msg).ok();
                     stdout.flush().ok();
                     return None;
                 }
@@ -222,11 +258,15 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
         .map(|r| (r.clone(), api_to_aws.get(r.as_str()).unwrap().to_string()))
         .collect();
         
+    let is_ru = is_russian();
+    let title = if is_ru { "=== DBD Блокировка Регионов (Интерактивный Режим) ===" } else { "=== DBD Region Locker (Interactive Mode) ===" };
+    let instructions = if is_ru { "Навигация: СТРЕЛКИ | Переключить: ПРОБЕЛ | Сохранить: ENTER | Выход: Ctrl+C" } else { "Navigate: ARROWS | Toggle: SPACE | Lock & Save: ENTER | Quit: Ctrl+C" };
+        
     run_interactive_menu(
-        "=== DBD Region Locker (Interactive Mode) ===",
+        title,
         &options,
         current_locked,
-        "Navigate: ARROWS | Toggle: SPACE | Lock & Save: ENTER | Quit: Ctrl+C",
+        instructions,
     )
 }
 
@@ -239,10 +279,14 @@ pub fn interactive_priority_menu(current_priority: &[String]) -> Option<Vec<Stri
         .map(|r| (r.clone(), r.clone()))
         .collect();
         
+    let is_ru = is_russian();
+    let title = if is_ru { "=== DBD Приоритетные Регионы (Интерактивный Режим) ===" } else { "=== DBD Priority Regions (Interactive Mode) ===" };
+    let instructions = if is_ru { "Навигация: СТРЕЛКИ | Переключить: ПРОБЕЛ | Сохранить: ENTER | Выход: Ctrl+C" } else { "Navigate: ARROWS | Toggle: SPACE | Save: ENTER | Quit: Ctrl+C" };
+        
     run_interactive_menu(
-        "=== DBD Priority Regions (Interactive Mode) ===",
+        title,
         &options,
         current_priority,
-        "Navigate: ARROWS | Toggle: SPACE | Save: ENTER | Quit: Ctrl+C",
+        instructions,
     )
 }
