@@ -56,6 +56,9 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
     script.push_str("sed -i '/# --- DBD REGION CHANGER START ---/,/# --- DBD REGION CHANGER END ---/d' /etc/hosts\n");
     
     // Remove existing iptables rules
+    script.push_str("iptables -D OUTPUT -m set --match-set dbdqueue_block dst -j REJECT 2>/dev/null\n");
+    script.push_str("ip6tables -D OUTPUT -m set --match-set dbdqueue_block_v6 dst -j REJECT 2>/dev/null\n");
+    // Also remove the old udp/icmp specific rules if they exist from a previous version
     script.push_str("iptables -D OUTPUT -p udp -m set --match-set dbdqueue_block dst -j REJECT 2>/dev/null\n");
     script.push_str("iptables -D OUTPUT -p icmp -m set --match-set dbdqueue_block dst -j REJECT 2>/dev/null\n");
     script.push_str("ip6tables -D OUTPUT -p udp -m set --match-set dbdqueue_block_v6 dst -j REJECT 2>/dev/null\n");
@@ -93,11 +96,9 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
             }
             script.push_str("EOF\n\n");
             
-            // Apply new rules restricting UDP and ICMP to block game traffic/pings without breaking TCP (web APIs)
-            script.push_str("iptables -I OUTPUT -p udp -m set --match-set dbdqueue_block dst -j REJECT\n");
-            script.push_str("iptables -I OUTPUT -p icmp -m set --match-set dbdqueue_block dst -j REJECT\n");
-            script.push_str("ip6tables -I OUTPUT -p udp -m set --match-set dbdqueue_block_v6 dst -j REJECT\n");
-            script.push_str("ip6tables -I OUTPUT -p icmpv6 -m set --match-set dbdqueue_block_v6 dst -j REJECT\n");
+            // Apply new rules restricting ALL traffic to block game traffic/pings over TCP as well
+            script.push_str("iptables -I OUTPUT -m set --match-set dbdqueue_block dst -j REJECT\n");
+            script.push_str("ip6tables -I OUTPUT -m set --match-set dbdqueue_block_v6 dst -j REJECT\n");
             
             println!("\x1b[93mRequesting elevated privileges to apply firewall rules (iptables/ipset)...\x1b[0m");
         }
