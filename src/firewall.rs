@@ -135,6 +135,11 @@ pub fn update_firewall(selected_aws_regions: Option<&[String]>) {
             let mut regions_to_block = Vec::new();
             for reg in all_regions {
                 let reg_string = reg.to_string();
+                // Always allow us-east-1 (Virginia) AWS IPs because they host the master game/login APIs.
+                // Matchmaking to Virginia is still successfully blocked via its Steam SDR relays (iad/atl).
+                if reg_string == "us-east-1" {
+                    continue;
+                }
                 if !selected.contains(&reg_string) {
                     regions_to_block.push(reg_string);
                 }

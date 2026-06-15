@@ -14,7 +14,7 @@ However, we found that:
 We will:
 1. Fetch the live Steam SDR configuration from `https://api.steampowered.com/ISteamApps/GetSDRConfig/v1/?appid=381210` at runtime.
 2. Define a static mapping of AWS regions (e.g., `us-east-1`) to Steam SDR PoP codes (e.g., `iad`, `atl`).
-3. For any non-whitelisted region, extract the relay IPs for their corresponding Steam PoPs, convert them to `/24` subnets, and block them alongside the AWS IP ranges.
+3. For any non-whitelisted region, extract the relay IPs for their corresponding Steam PoPs, convert them to `/24` subnets, and block them alongside the AWS IP ranges (except `us-east-1` AWS IP range which is always whitelisted to preserve backend game API access).
 4. Use native `nftables` (with `auto-merge` interval sets and `priority filter - 10`) when available, to ensure we intercept and reject these connections before `zapret` (which runs at `priority filter` / `0`) can intercept them.
 5. Fall back to `iptables`/`ipset` if `nftables` is not present.
 
