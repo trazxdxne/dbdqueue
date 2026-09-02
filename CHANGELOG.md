@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-03
+
+### Fixed
+- Fixed fake 0–3 ms ping measurements caused by local TUN/transparent proxy drivers intercepting raw TCP SYN packets; pings now use end-to-end TLS/HTTPS HEAD requests to measure true round-trip latency to AWS datacenters.
+- Enhanced API error diagnostics: when receiving an HTML block page (ISP block/TSPU, Cloudflare challenge) or empty response, clear status codes and body snippets are displayed instead of cryptic JSON parser errors.
+- Prevented TUI table collapse when API fetch fails; added informative error/loading placeholder rows.
+
+### Added
+- Added `[R]` keyboard shortcut (and Cyrillic `[К]`) to trigger an immediate background refresh of queue times and ping measurements.
+- Added support for custom API mirror endpoints via `DBD_API_URL` environment variable and `api_url` in `config.toml`.
+- Added automatic support for standard HTTP/HTTPS/ALL proxy environment variables.
+
 ## [0.5.0] - 2026-09-02
 
 ### Added
