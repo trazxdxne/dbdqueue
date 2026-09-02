@@ -75,7 +75,17 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
             loop {
                 match event {
                     AppEvent::Input(key) => match key {
-                        KeyCode::Char(c) => app.handle_key(c),
+                        KeyCode::Char(c) => {
+                            if app.handle_key(c) == crate::app::AppAction::Refresh {
+                                let tx_refresh = tx.clone();
+                                thread::spawn(move || {
+                                    let res = crate::api::fetch_queue_times();
+                                    tx_refresh.send(AppEvent::ApiUpdate(res)).unwrap_or(());
+                                    let pings = crate::ping::measure_all_regions_ping();
+                                    tx_refresh.send(AppEvent::PingUpdate(pings)).unwrap_or(());
+                                });
+                            }
+                        }
                         KeyCode::Up => app.handle_up(),
                         KeyCode::Down => app.handle_down(),
                         KeyCode::Enter => app.handle_enter(),

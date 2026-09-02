@@ -50,6 +50,12 @@ pub fn normalize_key_char(c: char) -> char {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum AppAction {
+    None,
+    Refresh,
+}
+
 pub struct App {
     pub queues: Vec<RegionQueueData>,
     pub api_last_updated: i64,
@@ -210,11 +216,13 @@ impl App {
 
     fn save_current_config(&self) {
         let config_path = get_config_path();
+        let existing = crate::config::load_config(&config_path);
         let config = AppConfig {
             priority: self.priority.clone(),
             locked: self.locked.clone(),
             sort: self.sort.clone(),
             mode: self.mode.clone(),
+            api_url: existing.api_url,
         };
         let _ = save_config(&config_path, &config);
     }
@@ -224,20 +232,21 @@ impl App {
         self.save_current_config();
     }
 
-    pub fn handle_key(&mut self, c: char) {
+    pub fn handle_key(&mut self, c: char) -> AppAction {
         let norm = normalize_key_char(c);
         if self.show_lock_modal {
             match norm {
                 ' ' => self.lock_modal_toggle(),
                 _ => {}
             }
+            AppAction::None
         } else {
             match norm {
-                's' => self.set_sort("survivor"),
-                'k' => self.set_sort("killer"),
-                'p' => self.set_sort("ping"),
-                'd' => self.set_sort("default"),
-                'l' => self.open_lock_modal(),
+                's' => { self.set_sort("survivor"); AppAction::None }
+                'k' => { self.set_sort("killer"); AppAction::None }
+                'p' => { self.set_sort("ping"); AppAction::None }
+                'd' => { self.set_sort("default"); AppAction::None }
+                'l' => { self.open_lock_modal(); AppAction::None }
                 'm' => {
                     if self.mode == "standard" {
                         self.mode = "event".to_string();
@@ -245,8 +254,15 @@ impl App {
                         self.mode = "standard".to_string();
                     }
                     self.save_current_config();
+                    AppAction::None
                 }
-                _ => {}
+                'r' => {
+                    self.is_fetching = true;
+                    self.error_msg = None;
+                    self.status_msg = Some(if is_russian() { "Обновление данных...".to_string() } else { "Refreshing data...".to_string() });
+                    AppAction::Refresh
+                }
+                _ => AppAction::None,
             }
         }
     }
@@ -328,7 +344,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Get rows first so we can dynamically size the table block
     let rows_data = app.get_filtered_sorted_rows();
-    let table_height = (rows_data.len() as u16) + 4; // 1 header, 1 margin, 2 borders
+    let is_empty = rows_data.is_empty();
+    let table_height = if is_empty {
+        6 // Header (1), margin (1), border (2), placeholder row (1), bottom buffer (1)
+    } else {
+        (rows_data.len() as u16) + 4 // 1 header, 1 margin, 2 borders
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -355,61 +376,78 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Table
     let api_to_aws = crate::api::get_api_to_aws();
-    let rows = rows_data.into_iter().map(|item| {
-        let aws_code = api_to_aws.get(item.name.as_str()).unwrap_or(&"");
-        let is_whitelisted = app.locked.iter().any(|l| l == aws_code);
-        let is_disabled = item.survivor == "—" && item.killer == "—";
-
-        let reg_str = if item.flag.is_empty() {
-            item.name.clone()
+    let rows: Vec<Row> = if is_empty {
+        let (msg, color) = if app.is_fetching {
+            (if is_ru { "  Загрузка данных очередей..." } else { "  Fetching queue times..." }, Color::Yellow)
+        } else if app.error_msg.is_some() {
+            (if is_ru { "  Не удалось загрузить данные очередей. Проверьте сеть или прокси. Нажмите 'R' для повтора." } else { "  Failed to load queue data. Check network or proxy. Press 'R' to retry." }, Color::Red)
         } else {
-            format!("{} {}", item.flag, item.name)
+            (if is_ru { "  Нет данных для выбранного режима." } else { "  No queue data available for this mode." }, Color::DarkGray)
         };
+        vec![Row::new(vec![
+            Cell::from(Span::styled(msg, Style::default().fg(color))),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+            Cell::from(""),
+        ])]
+    } else {
+        rows_data.into_iter().map(|item| {
+            let aws_code = api_to_aws.get(item.name.as_str()).unwrap_or(&"");
+            let is_whitelisted = app.locked.iter().any(|l| l == aws_code);
+            let is_disabled = item.survivor == "—" && item.killer == "—";
 
-        if is_disabled {
-            let dim_style = Style::default().fg(Color::DarkGray);
-            let lock_text = if is_whitelisted { "[LOCKED]" } else { "—" };
-
-            Row::new(vec![
-                Cell::from(Span::styled(reg_str, dim_style)),
-                Cell::from(Span::styled("—", dim_style)),
-                Cell::from(Span::styled("—", dim_style)),
-                Cell::from(Span::styled("—", dim_style)),
-                Cell::from(Span::styled(lock_text, dim_style)),
-            ])
-        } else {
-            let name_style = if is_whitelisted {
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            let reg_str = if item.flag.is_empty() {
+                item.name.clone()
             } else {
-                Style::default()
+                format!("{} {}", item.flag, item.name)
             };
 
-            let (ping_str, ping_color) = if let Some(&ms) = app.pings.get(*aws_code) {
-                (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
-            } else if app.pings.is_empty() {
-                ("...".to_string(), Color::DarkGray)
+            if is_disabled {
+                let dim_style = Style::default().fg(Color::DarkGray);
+                let lock_text = if is_whitelisted { "[LOCKED]" } else { "—" };
+
+                Row::new(vec![
+                    Cell::from(Span::styled(reg_str, dim_style)),
+                    Cell::from(Span::styled("—", dim_style)),
+                    Cell::from(Span::styled("—", dim_style)),
+                    Cell::from(Span::styled("—", dim_style)),
+                    Cell::from(Span::styled(lock_text, dim_style)),
+                ])
             } else {
-                ("—".to_string(), Color::DarkGray)
-            };
+                let name_style = if is_whitelisted {
+                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                };
 
-            let (lock_text, lock_style) = if is_whitelisted {
-                ("[LOCKED]".to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-            } else {
-                ("—".to_string(), Style::default().fg(Color::DarkGray))
-            };
+                let (ping_str, ping_color) = if let Some(&ms) = app.pings.get(*aws_code) {
+                    (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
+                } else if app.pings.is_empty() {
+                    ("...".to_string(), Color::DarkGray)
+                } else {
+                    ("—".to_string(), Color::DarkGray)
+                };
 
-            let surv_color = color_for_time(&item.survivor);
-            let kill_color = color_for_time(&item.killer);
+                let (lock_text, lock_style) = if is_whitelisted {
+                    ("[LOCKED]".to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+                } else {
+                    ("—".to_string(), Style::default().fg(Color::DarkGray))
+                };
 
-            Row::new(vec![
-                Cell::from(Span::styled(reg_str, name_style)),
-                Cell::from(Span::styled(ping_str, Style::default().fg(ping_color))),
-                Cell::from(Span::styled(item.survivor.clone(), Style::default().fg(surv_color))),
-                Cell::from(Span::styled(item.killer.clone(), Style::default().fg(kill_color))),
-                Cell::from(Span::styled(lock_text, lock_style)),
-            ])
-        }
-    });
+                let surv_color = color_for_time(&item.survivor);
+                let kill_color = color_for_time(&item.killer);
+
+                Row::new(vec![
+                    Cell::from(Span::styled(reg_str, name_style)),
+                    Cell::from(Span::styled(ping_str, Style::default().fg(ping_color))),
+                    Cell::from(Span::styled(item.survivor.clone(), Style::default().fg(surv_color))),
+                    Cell::from(Span::styled(item.killer.clone(), Style::default().fg(kill_color))),
+                    Cell::from(Span::styled(lock_text, lock_style)),
+                ])
+            }
+        }).collect()
+    };
 
     let active_sort_str = match app.sort.as_str() {
         "survivor" => if is_ru { "Выживший" } else { "Survivor" },
@@ -491,6 +529,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let lock_txt = if is_ru { "Блокировка " } else { "Lock " };
     let sort_txt = if is_ru { "Сортировка " } else { "Sort " };
     let mode_txt = if is_ru { "Режим " } else { "Mode " };
+    let refresh_txt = if is_ru { "Обновить " } else { "Refresh " };
     let quit_txt = if is_ru { "Выход " } else { "Quit " };
 
     let footer = Paragraph::new(Line::from(vec![
@@ -502,6 +541,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Span::raw(sort_txt),
         Span::styled(" [M] ", Style::default().fg(Color::Yellow)),
         Span::raw(mode_txt),
+        Span::styled(" [R] ", Style::default().fg(Color::Yellow)),
+        Span::raw(refresh_txt),
         Span::styled(" [Esc] ", Style::default().fg(Color::Yellow)),
         Span::raw(quit_txt),
         Span::raw(" | "),

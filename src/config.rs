@@ -12,6 +12,8 @@ pub struct AppConfig {
     pub sort: String,
     #[serde(default = "default_mode")]
     pub mode: String,
+    #[serde(default)]
+    pub api_url: Option<String>,
 }
 
 fn default_sort() -> String {
@@ -29,6 +31,7 @@ impl Default for AppConfig {
             locked: vec![],
             sort: default_sort(),
             mode: default_mode(),
+            api_url: None,
         }
     }
 }

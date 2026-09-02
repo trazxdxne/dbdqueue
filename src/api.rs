@@ -113,13 +113,13 @@ struct QueueTime {
 }
 
 #[derive(Deserialize, Debug)]
-struct QueueData {
+pub(crate) struct QueueData {
     killer: Option<QueueTime>,
     survivor: Option<QueueTime>,
 }
 
 #[derive(Deserialize, Debug)]
-struct Api2Response {
+pub(crate) struct Api2Response {
     lastupdated2: i64,
     queues: HashMap<String, HashMap<String, QueueData>>,
 }
@@ -144,19 +144,64 @@ pub fn format_seconds_to_time(seconds_str: &str) -> String {
     }
 }
 
+pub fn get_api_url() -> String {
+    if let Ok(env_url) = std::env::var("DBD_API_URL") {
+        let trimmed = env_url.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    let config_path = crate::config::get_config_path();
+    let config = crate::config::load_config(&config_path);
+    if let Some(cfg_url) = config.api_url {
+        let trimmed = cfg_url.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "https://api2.deadbyqueue.com/queues".to_string()
+}
+
+pub fn parse_queue_response(body: &str, status: u16) -> Result<Api2Response, String> {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Empty response received from API (HTTP {})", status));
+    }
+
+    if trimmed.starts_with('<') {
+        let snippet: String = trimmed.chars().take(80).collect();
+        let clean_snippet = snippet.replace(['\r', '\n'], " ");
+        return Err(format!(
+            "Received HTML block/page instead of JSON (HTTP {}): {}...",
+            status, clean_snippet.trim()
+        ));
+    }
+
+    serde_json::from_str::<Api2Response>(trimmed).map_err(|e| {
+        let snippet: String = trimmed.chars().take(80).collect();
+        let clean_snippet = snippet.replace(['\r', '\n'], " ");
+        format!("Error parsing JSON ({}) at line {} col {}: {}...", e, e.line(), e.column(), clean_snippet.trim())
+    })
+}
+
 pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
-    let url = "https://api2.deadbyqueue.com/queues";
-    let resp = ureq::get(url)
+    let url = get_api_url();
+    let agent = ureq::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .try_proxy_from_env(true)
+        .build();
+
+    let resp = agent.get(&url)
         .set("User-Agent", "curl/8.7.1")
-        .set("Accept", "*/*")
+        .set("Accept", "application/json, text/plain, */*")
         .call()
-        .map_err(|e| format!("Error fetching data: {}", e))?;
+        .map_err(|e| format!("Error connecting to API: {}", e))?;
         
+    let status = resp.status();
     let body = resp.into_string()
-        .map_err(|e| format!("Error reading response: {}", e))?;
+        .map_err(|e| format!("Error reading response (HTTP {}): {}", status, e))?;
         
-    let api_data: Api2Response = serde_json::from_str(&body)
-        .map_err(|e| format!("Error parsing JSON: {}", e))?;
+    let api_data = parse_queue_response(&body, status)?;
         
     let aws_to_api = get_aws_to_api();
     let aws_to_flag = get_aws_to_flag();
@@ -251,5 +296,24 @@ mod tests {
         let frank_live = live_queues.get("eu-central-1").unwrap();
         assert_eq!(frank_live.killer.as_ref().unwrap().time, "207");
         assert_eq!(frank_live.survivor.as_ref().unwrap().time, "5");
+    }
+
+    #[test]
+    fn test_parse_html_error() {
+        let html = "<!DOCTYPE html><html><body>Access Denied / Blocked</body></html>";
+        let res = parse_queue_response(html, 200);
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("Received HTML block/page instead of JSON"));
+        assert!(err.contains("Access Denied"));
+    }
+
+    #[test]
+    fn test_parse_empty_error() {
+        let empty = "   \n";
+        let res = parse_queue_response(empty, 200);
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert!(err.contains("Empty response received"));
     }
 }

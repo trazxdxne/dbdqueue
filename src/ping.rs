@@ -5,14 +5,37 @@ use std::time::{Duration, Instant};
 use ratatui::style::Color;
 
 pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
-    let host = format!("dynamodb.{}.amazonaws.com:443", region_code);
-    let addrs = host.to_socket_addrs().ok()?;
-    let addr = addrs.into_iter().next()?;
-    
+    // 1. Try end-to-end TLS / HTTPS HEAD request to force the connection through any TUN / transparent proxy.
+    // When a proxy or TUN adapter (WinTun / Sing-box / Hiddify / Clash) is active, raw TCP SYN packets
+    // are answered locally in < 1ms (0ms ping). A TLS handshake cannot be faked locally and requires
+    // full round-trip communication with the AWS datacenter.
+    let url = format!("https://dynamodb.{}.amazonaws.com", region_code);
+    let agent = ureq::builder()
+        .timeout(timeout)
+        .try_proxy_from_env(true)
+        .build();
+
     let start = Instant::now();
-    match TcpStream::connect_timeout(&addr, timeout) {
-        Ok(_) => Some(start.elapsed().as_millis() as u32),
-        Err(_) => None,
+    let res = agent.head(&url).call();
+    let elapsed = start.elapsed().as_millis() as u32;
+
+    match res {
+        Ok(_) | Err(ureq::Error::Status(_, _)) => {
+            // Even HTTP 400/403/404 confirms end-to-end TLS handshake and RTT to AWS
+            Some(elapsed)
+        }
+        Err(_) => {
+            // Fallback to raw TCP connection if HTTPS request fails
+            let host = format!("dynamodb.{}.amazonaws.com:443", region_code);
+            let addrs = host.to_socket_addrs().ok()?;
+            let addr = addrs.into_iter().next()?;
+            
+            let tcp_start = Instant::now();
+            match TcpStream::connect_timeout(&addr, timeout) {
+                Ok(_) => Some(tcp_start.elapsed().as_millis() as u32),
+                Err(_) => None,
+            }
+        }
     }
 }
 
