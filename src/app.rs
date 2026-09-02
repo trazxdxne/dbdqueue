@@ -1,11 +1,12 @@
 use crate::api::{self, RegionQueueData};
 use ratatui::{
-    layout::{Constraint, Direction, Layout},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Span, Line},
-    widgets::{Block, Borders, Cell, Row, Table, Paragraph, TableState, Clear},
+    widgets::{Block, Borders, Cell, Row, Table, Paragraph, TableState, Clear, List, ListItem},
     Frame,
 };
+use std::collections::HashMap;
 
 use crate::config::{AppConfig, get_config_path, save_config};
 
@@ -17,37 +18,85 @@ fn is_russian() -> bool {
     lang.starts_with("ru") || lc_all.starts_with("ru") || lc_msg.starts_with("ru")
 }
 
+pub fn normalize_key_char(c: char) -> char {
+    match c {
+        'й' | 'Й' => 'q',
+        'ц' | 'Ц' => 'w',
+        'у' | 'У' => 'e',
+        'к' | 'К' => 'r',
+        'е' | 'Е' => 't',
+        'н' | 'Н' => 'y',
+        'г' | 'Г' => 'u',
+        'ш' | 'Ш' => 'i',
+        'щ' | 'Щ' => 'o',
+        'з' | 'З' => 'p',
+        'ф' | 'Ф' => 'a',
+        'ы' | 'Ы' => 's',
+        'в' | 'В' => 'd',
+        'а' | 'А' => 'f',
+        'п' | 'П' => 'g',
+        'р' | 'Р' => 'h',
+        'о' | 'О' => 'j',
+        'л' | 'Л' => 'k',
+        'д' | 'Д' => 'l',
+        'я' | 'Я' => 'z',
+        'ч' | 'Ч' => 'x',
+        'с' | 'С' => 'c',
+        'м' | 'М' => 'v',
+        'и' | 'И' => 'b',
+        'т' | 'Т' => 'n',
+        'ь' | 'Ь' => 'm',
+        other => other.to_ascii_lowercase(),
+    }
+}
+
 pub struct App {
     pub queues: Vec<RegionQueueData>,
     pub api_last_updated: i64,
+    pub pings: HashMap<String, u32>,
     pub sort: String,
     pub mode: String,
     pub priority: Vec<String>,
+    pub locked: Vec<String>,
     pub error_msg: Option<String>,
+    pub status_msg: Option<String>,
     pub should_quit: bool,
     pub is_fetching: bool,
     pub table_state: TableState,
+    pub show_lock_modal: bool,
+    pub lock_modal_selected: Vec<String>,
+    pub lock_modal_cursor: usize,
 }
 
 impl App {
-    pub fn new(sort: String, mode: String, priority: Vec<String>) -> Self {
+    pub fn new(sort: String, mode: String, priority: Vec<String>, locked: Vec<String>) -> Self {
         Self {
             queues: Vec::new(),
             api_last_updated: 0,
+            pings: HashMap::new(),
             sort,
             mode,
             priority,
+            locked,
             error_msg: None,
+            status_msg: None,
             should_quit: false,
             is_fetching: true,
             table_state: TableState::default(),
+            show_lock_modal: false,
+            lock_modal_selected: Vec::new(),
+            lock_modal_cursor: 0,
         }
     }
 
     pub fn next(&mut self) {
+        let total = self.get_filtered_sorted_rows().len();
+        if total == 0 {
+            return;
+        }
         let i = match self.table_state.selected() {
             Some(i) => {
-                if i >= self.get_filtered_sorted_rows().len().saturating_sub(1) {
+                if i >= total.saturating_sub(1) {
                     0
                 } else {
                     i + 1
@@ -59,10 +108,14 @@ impl App {
     }
 
     pub fn previous(&mut self) {
+        let total = self.get_filtered_sorted_rows().len();
+        if total == 0 {
+            return;
+        }
         let i = match self.table_state.selected() {
             Some(i) => {
                 if i == 0 {
-                    self.get_filtered_sorted_rows().len().saturating_sub(1)
+                    total.saturating_sub(1)
                 } else {
                     i - 1
                 }
@@ -72,68 +125,197 @@ impl App {
         self.table_state.select(Some(i));
     }
 
-    pub fn handle_key(&mut self, c: char) {
-        match c {
-            'q' => self.should_quit = true,
-            's' => self.sort = "survivor".to_string(),
-            'k' => self.sort = "killer".to_string(),
-            'r' => self.sort = "priority".to_string(),
-            'p' => self.toggle_priority(),
-            'm' => {
-                if self.mode == "standard" {
-                    self.mode = "event".to_string();
-                } else {
-                    self.mode = "standard".to_string();
-                }
-            }
-            _ => {}
+    pub fn get_modal_regions(&self) -> Vec<&'static str> {
+        let mut regions = crate::api::get_all_aws_regions();
+        regions.sort_by(|&a, &b| {
+            let a_ping = self.pings.get(a).copied().unwrap_or(u32::MAX);
+            let b_ping = self.pings.get(b).copied().unwrap_or(u32::MAX);
+            a_ping.cmp(&b_ping).then_with(|| {
+                let aws_to_api = crate::api::get_aws_to_api();
+                let a_name = aws_to_api.get(a).unwrap_or(&a);
+                let b_name = aws_to_api.get(b).unwrap_or(&b);
+                a_name.cmp(b_name)
+            })
+        });
+        regions
+    }
+
+    pub fn open_lock_modal(&mut self) {
+        self.show_lock_modal = true;
+        self.lock_modal_selected = self.locked.clone();
+        self.lock_modal_cursor = 0;
+    }
+
+    pub fn lock_modal_up(&mut self) {
+        let regions = self.get_modal_regions();
+        if self.lock_modal_cursor == 0 {
+            self.lock_modal_cursor = regions.len().saturating_sub(1);
+        } else {
+            self.lock_modal_cursor -= 1;
         }
     }
 
-    pub fn toggle_priority(&mut self) {
-        if let Some(i) = self.table_state.selected() {
-            let rows = self.get_filtered_sorted_rows();
-            if let Some(row) = rows.get(i) {
-                let name = row.name.clone();
-                if let Some(pos) = self.priority.iter().position(|p| p == &name) {
-                    self.priority.remove(pos);
-                } else {
-                    self.priority.push(name);
-                }
-                
-                // Save to config
-                let config_path = get_config_path();
-                let config = AppConfig {
-                    priority: self.priority.clone(),
-                    sort: self.sort.clone(),
-                    mode: self.mode.clone(),
-                };
-                let _ = save_config(&config_path, &config);
+    pub fn lock_modal_down(&mut self) {
+        let regions = self.get_modal_regions();
+        if self.lock_modal_cursor >= regions.len().saturating_sub(1) {
+            self.lock_modal_cursor = 0;
+        } else {
+            self.lock_modal_cursor += 1;
+        }
+    }
+
+    pub fn lock_modal_toggle(&mut self) {
+        let regions = self.get_modal_regions();
+        if let Some(code) = regions.get(self.lock_modal_cursor) {
+            let code_str = code.to_string();
+            if let Some(pos) = self.lock_modal_selected.iter().position(|r| r == &code_str) {
+                self.lock_modal_selected.remove(pos);
+            } else {
+                self.lock_modal_selected.push(code_str);
             }
+        }
+    }
+
+    pub fn apply_lock_modal(&mut self) {
+        self.show_lock_modal = false;
+        self.locked = self.lock_modal_selected.clone();
+        self.save_current_config();
+        
+        let lock_target = if self.locked.is_empty() {
+            None
+        } else {
+            Some(self.locked.as_slice())
+        };
+        let res = crate::hosts::update_hosts(lock_target, false);
+        let is_ru = is_russian();
+        self.status_msg = Some(match res {
+            crate::hosts::UpdateHostsResult::Updated => {
+                if is_ru { "Блокировка регионов обновлена!".to_string() } else { "Region locks updated!".to_string() }
+            }
+            crate::hosts::UpdateHostsResult::AlreadyUpToDate => {
+                if is_ru { "Файл hosts уже актуален".to_string() } else { "Hosts file is up to date".to_string() }
+            }
+            crate::hosts::UpdateHostsResult::ElevationFailed => {
+                if is_ru { "Ошибка: отказ в правах Администратора".to_string() } else { "Error: admin elevation denied".to_string() }
+            }
+            crate::hosts::UpdateHostsResult::Error(e) => {
+                if is_ru { format!("Ошибка: {}", e) } else { format!("Error: {}", e) }
+            }
+        });
+    }
+
+    pub fn cancel_lock_modal(&mut self) {
+        self.show_lock_modal = false;
+    }
+
+    fn save_current_config(&self) {
+        let config_path = get_config_path();
+        let config = AppConfig {
+            priority: self.priority.clone(),
+            locked: self.locked.clone(),
+            sort: self.sort.clone(),
+            mode: self.mode.clone(),
+        };
+        let _ = save_config(&config_path, &config);
+    }
+
+    pub fn set_sort(&mut self, sort: &str) {
+        self.sort = sort.to_string();
+        self.save_current_config();
+    }
+
+    pub fn handle_key(&mut self, c: char) {
+        let norm = normalize_key_char(c);
+        if self.show_lock_modal {
+            match norm {
+                ' ' => self.lock_modal_toggle(),
+                _ => {}
+            }
+        } else {
+            match norm {
+                's' => self.set_sort("survivor"),
+                'k' => self.set_sort("killer"),
+                'p' => self.set_sort("ping"),
+                'd' => self.set_sort("default"),
+                'l' => self.open_lock_modal(),
+                'm' => {
+                    if self.mode == "standard" {
+                        self.mode = "event".to_string();
+                    } else {
+                        self.mode = "standard".to_string();
+                    }
+                    self.save_current_config();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    pub fn handle_up(&mut self) {
+        if self.show_lock_modal {
+            self.lock_modal_up();
+        } else {
+            self.previous();
+        }
+    }
+
+    pub fn handle_down(&mut self) {
+        if self.show_lock_modal {
+            self.lock_modal_down();
+        } else {
+            self.next();
+        }
+    }
+
+    pub fn handle_enter(&mut self) {
+        if self.show_lock_modal {
+            self.apply_lock_modal();
+        }
+    }
+
+    pub fn handle_esc(&mut self) {
+        if self.show_lock_modal {
+            self.cancel_lock_modal();
+        } else {
+            self.should_quit = true;
         }
     }
 
     pub fn get_filtered_sorted_rows(&self) -> Vec<RegionQueueData> {
+        let api_to_aws = crate::api::get_api_to_aws();
         let mut filtered: Vec<RegionQueueData> = self.queues.iter().filter(|r| {
             if self.mode == "standard" { r.mode == "Standard" }
             else if self.mode == "event" { r.mode == "Event" }
-            else { r.mode == "Standard" } // Fallback
+            else { r.mode == "Standard" }
         }).cloned().collect();
 
         filtered.sort_by(|a, b| {
-            let a_is_prio = self.priority.contains(&a.name);
-            let b_is_prio = self.priority.contains(&b.name);
-            
-            if a_is_prio != b_is_prio {
-                return b_is_prio.cmp(&a_is_prio); // true > false, so prioritized comes first
+            let a_disabled = a.survivor == "—" && a.killer == "—";
+            let b_disabled = b.survivor == "—" && b.killer == "—";
+
+            if a_disabled != b_disabled {
+                return a_disabled.cmp(&b_disabled);
             }
 
-            if self.sort == "survivor" {
-                api::parse_time_to_seconds(&a.survivor).cmp(&api::parse_time_to_seconds(&b.survivor))
-            } else if self.sort == "killer" {
-                api::parse_time_to_seconds(&a.killer).cmp(&api::parse_time_to_seconds(&b.killer))
-            } else {
-                a.name.cmp(&b.name)
+            match self.sort.as_str() {
+                "survivor" => {
+                    let a_time = api::parse_time_to_seconds(&a.survivor);
+                    let b_time = api::parse_time_to_seconds(&b.survivor);
+                    a_time.cmp(&b_time).then_with(|| a.name.cmp(&b.name))
+                }
+                "killer" => {
+                    let a_time = api::parse_time_to_seconds(&a.killer);
+                    let b_time = api::parse_time_to_seconds(&b.killer);
+                    a_time.cmp(&b_time).then_with(|| a.name.cmp(&b.name))
+                }
+                "ping" => {
+                    let a_code = api_to_aws.get(a.name.as_str()).unwrap_or(&"");
+                    let b_code = api_to_aws.get(b.name.as_str()).unwrap_or(&"");
+                    let a_ping = self.pings.get(*a_code).copied().unwrap_or(u32::MAX);
+                    let b_ping = self.pings.get(*b_code).copied().unwrap_or(u32::MAX);
+                    a_ping.cmp(&b_ping).then_with(|| a.name.cmp(&b.name))
+                }
+                _ => a.name.cmp(&b.name),
             }
         });
         filtered
@@ -172,31 +354,67 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     f.render_widget(title, chunks[0]);
 
     // Table
-
+    let api_to_aws = crate::api::get_api_to_aws();
     let rows = rows_data.into_iter().map(|item| {
-        let name_style = if app.priority.contains(&item.name) {
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+        let aws_code = api_to_aws.get(item.name.as_str()).unwrap_or(&"");
+        let is_whitelisted = app.locked.iter().any(|l| l == aws_code);
+        let is_disabled = item.survivor == "—" && item.killer == "—";
+
+        let reg_str = if item.flag.is_empty() {
+            item.name.clone()
         } else {
-            Style::default()
+            format!("{} {}", item.flag, item.name)
         };
 
-        let surv_color = color_for_time(&item.survivor);
-        let kill_color = color_for_time(&item.killer);
+        if is_disabled {
+            let dim_style = Style::default().fg(Color::DarkGray);
+            let lock_text = if is_whitelisted { "[LOCKED]" } else { "—" };
 
-        let flag_spaced = if item.flag.is_empty() { String::new() } else { format!("{} ", item.flag) };
-        let full_name = format!("{}{}", flag_spaced, item.name);
-        
-        Row::new(vec![
-            Cell::from(Span::styled(full_name, name_style)),
-            Cell::from(Span::styled(item.survivor.clone(), Style::default().fg(surv_color))),
-            Cell::from(Span::styled(item.killer.clone(), Style::default().fg(kill_color))),
-        ])
+            Row::new(vec![
+                Cell::from(Span::styled(reg_str, dim_style)),
+                Cell::from(Span::styled("—", dim_style)),
+                Cell::from(Span::styled("—", dim_style)),
+                Cell::from(Span::styled("—", dim_style)),
+                Cell::from(Span::styled(lock_text, dim_style)),
+            ])
+        } else {
+            let name_style = if is_whitelisted {
+                Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default()
+            };
+
+            let (ping_str, ping_color) = if let Some(&ms) = app.pings.get(*aws_code) {
+                (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
+            } else if app.pings.is_empty() {
+                ("...".to_string(), Color::DarkGray)
+            } else {
+                ("—".to_string(), Color::DarkGray)
+            };
+
+            let (lock_text, lock_style) = if is_whitelisted {
+                ("[LOCKED]".to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
+            } else {
+                ("—".to_string(), Style::default().fg(Color::DarkGray))
+            };
+
+            let surv_color = color_for_time(&item.survivor);
+            let kill_color = color_for_time(&item.killer);
+
+            Row::new(vec![
+                Cell::from(Span::styled(reg_str, name_style)),
+                Cell::from(Span::styled(ping_str, Style::default().fg(ping_color))),
+                Cell::from(Span::styled(item.survivor.clone(), Style::default().fg(surv_color))),
+                Cell::from(Span::styled(item.killer.clone(), Style::default().fg(kill_color))),
+                Cell::from(Span::styled(lock_text, lock_style)),
+            ])
+        }
     });
 
     let active_sort_str = match app.sort.as_str() {
         "survivor" => if is_ru { "Выживший" } else { "Survivor" },
         "killer" => if is_ru { "Маньяк" } else { "Killer" },
-        "priority" => if is_ru { "Приоритет" } else { "Priority" },
+        "ping" => if is_ru { "Пинг" } else { "Ping" },
         _ => if is_ru { "По умолч." } else { "Default" },
     };
 
@@ -210,23 +428,33 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         app.mode.as_str()
     };
 
-    let table_title = if is_ru {
-        format!(" Сортировка: {} | Режим: {} ", active_sort_str, mode_str)
+    let lock_str = if app.locked.is_empty() {
+        if is_ru { "Все" } else { "All" }
     } else {
-        format!(" Sort: {} | Mode: {} ", active_sort_str, mode_str)
+        if is_ru { "Активен" } else { "Active" }
+    };
+
+    let table_title = if is_ru {
+        format!(" Сортировка: {} | Режим: {} | Блокировка: {} ", active_sort_str, mode_str, lock_str)
+    } else {
+        format!(" Sort: {} | Mode: {} | Lock: {} ", active_sort_str, mode_str, lock_str)
     };
 
     let hdr_region = if is_ru { "Регион" } else { "Region" };
+    let hdr_ping = if is_ru { "Пинг" } else { "Ping" };
     let hdr_survivor = if is_ru { "Выживший" } else { "Survivor" };
     let hdr_killer = if is_ru { "Маньяк" } else { "Killer" };
+    let hdr_lock = if is_ru { "Блокировка" } else { "Lock" };
 
     let table = Table::new(rows, [
-        Constraint::Length(35),
+        Constraint::Length(22),
+        Constraint::Length(10),
+        Constraint::Length(12),
         Constraint::Length(12),
         Constraint::Length(12),
     ])
     .header(
-        Row::new(vec![hdr_region, hdr_survivor, hdr_killer])
+        Row::new(vec![hdr_region, hdr_ping, hdr_survivor, hdr_killer, hdr_lock])
             .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
             .bottom_margin(1),
     )
@@ -249,7 +477,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if is_ru { format!("{} ч. {} мин. назад", diff / 3600, (diff % 3600) / 60) } else { format!("{} hrs {} mins ago", diff / 3600, (diff % 3600) / 60) }
     };
 
-    let status_text = if let Some(ref err) = app.error_msg {
+    let status_text = if let Some(ref status) = app.status_msg {
+        status.clone()
+    } else if let Some(ref err) = app.error_msg {
         if is_ru { format!("Ошибка: {}", err) } else { format!("Error: {}", err) }
     } else if app.is_fetching {
         if is_ru { "Обновление данных...".to_string() } else { "Updating data...".to_string() }
@@ -258,29 +488,111 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     };
 
     let scroll_txt = if is_ru { "Прокрутка " } else { "Scroll " };
-    let prio_txt = if is_ru { "Приоритет " } else { "Prioritize " };
-    let quit_txt = if is_ru { "Выход " } else { "Quit " };
+    let lock_txt = if is_ru { "Блокировка " } else { "Lock " };
     let sort_txt = if is_ru { "Сортировка " } else { "Sort " };
-    let mode_txt = if is_ru { "Режим " } else { "Toggle Mode " };
+    let mode_txt = if is_ru { "Режим " } else { "Mode " };
+    let quit_txt = if is_ru { "Выход " } else { "Quit " };
 
     let footer = Paragraph::new(Line::from(vec![
         Span::styled(" [\u{2191}\u{2193}] ", Style::default().fg(Color::Yellow)),
         Span::raw(scroll_txt),
-        Span::styled(" [p] ", Style::default().fg(Color::Yellow)),
-        Span::raw(prio_txt),
-        Span::styled(" [q] ", Style::default().fg(Color::Yellow)),
-        Span::raw(quit_txt),
-        Span::styled(" [s/k/r] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [L] ", Style::default().fg(Color::Yellow)),
+        Span::raw(lock_txt),
+        Span::styled(" [S/K/P/D] ", Style::default().fg(Color::Yellow)),
         Span::raw(sort_txt),
-        Span::styled(" [m] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [M] ", Style::default().fg(Color::Yellow)),
         Span::raw(mode_txt),
+        Span::styled(" [Esc] ", Style::default().fg(Color::Yellow)),
+        Span::raw(quit_txt),
         Span::raw(" | "),
         Span::styled(status_text, Style::default().fg(Color::DarkGray)),
     ]));
     f.render_widget(footer, chunks[3]);
+
+    if app.show_lock_modal {
+        let area = centered_rect(65, 80, f.area());
+        f.render_widget(Clear, area);
+        
+        let modal_title = if is_ru {
+            " Блокировка Регионов (выберите разрешенные) "
+        } else {
+            " Region Locker (select whitelisted) "
+        };
+        
+        let modal_instructions = if is_ru {
+            " [↑↓] Выбор  [Пробел] Вкл/Выкл  [Enter] Применить  [Esc] Отмена "
+        } else {
+            " [↑↓] Select  [Space] Toggle  [Enter] Apply  [Esc] Cancel "
+        };
+        
+        let modal_regions = app.get_modal_regions();
+        let aws_to_api = crate::api::get_aws_to_api();
+        let aws_to_flag = crate::api::get_aws_to_flag();
+        
+        let items: Vec<ListItem> = modal_regions.iter().enumerate().map(|(idx, code)| {
+            let name = aws_to_api.get(*code).unwrap_or(code);
+            let flag = aws_to_flag.get(*code).unwrap_or(&"");
+            let is_selected = app.lock_modal_selected.iter().any(|r| r == *code);
+            
+            let checkbox = if is_selected { "[*] " } else { "[ ] " };
+            
+            let ping_str = if let Some(&ms) = app.pings.get(*code) {
+                format!(" - {} ms", ms)
+            } else {
+                String::new()
+            };
+            
+            let text = format!("{}{} {} ({}){}", checkbox, flag, name, code, ping_str);
+            
+            let mut style = if is_selected {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            };
+            
+            if idx == app.lock_modal_cursor {
+                style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
+            }
+            
+            ListItem::new(text).style(style)
+        }).collect();
+        
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Cyan))
+                    .title(Span::styled(modal_title, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
+                    .title_bottom(Span::styled(modal_instructions, Style::default().fg(Color::Cyan)))
+            );
+        f.render_widget(list, area);
+    }
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 fn color_for_time(time_str: &str) -> Color {
+    if time_str == "—" || time_str.is_empty() {
+        return Color::DarkGray;
+    }
     let sec = api::parse_time_to_seconds(time_str);
     if sec < 60 {
         Color::Green
@@ -290,3 +602,115 @@ fn color_for_time(time_str: &str) -> Color {
         Color::Red
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_key_char() {
+        assert_eq!(normalize_key_char('д'), 'l');
+        assert_eq!(normalize_key_char('Д'), 'l');
+        assert_eq!(normalize_key_char('ы'), 's');
+        assert_eq!(normalize_key_char('Ы'), 's');
+        assert_eq!(normalize_key_char('л'), 'k');
+        assert_eq!(normalize_key_char('Л'), 'k');
+        assert_eq!(normalize_key_char('з'), 'p');
+        assert_eq!(normalize_key_char('З'), 'p');
+        assert_eq!(normalize_key_char('ь'), 'm');
+        assert_eq!(normalize_key_char('Ь'), 'm');
+        assert_eq!(normalize_key_char('L'), 'l');
+        assert_eq!(normalize_key_char('l'), 'l');
+    }
+
+    #[test]
+    fn test_sort_by_ping() {
+        let mut app = App::new("ping".to_string(), "standard".to_string(), vec![], vec![]);
+        app.queues = vec![
+            RegionQueueData {
+                flag: "[US]".to_string(),
+                name: "Virginia".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "5s".to_string(),
+                killer: "10s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "5s".to_string(),
+                killer: "10s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[JP]".to_string(),
+                name: "Tokyo".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "5s".to_string(),
+                killer: "10s".to_string(),
+            },
+        ];
+        // Frankfurt: 30ms, Virginia: 110ms, Tokyo: unmeasured
+        app.pings.insert("eu-central-1".to_string(), 30);
+        app.pings.insert("us-east-1".to_string(), 110);
+
+        let rows = app.get_filtered_sorted_rows();
+        assert_eq!(rows[0].name, "Frankfurt");
+        assert_eq!(rows[1].name, "Virginia");
+        assert_eq!(rows[2].name, "Tokyo");
+    }
+
+    #[test]
+    fn test_modal_regions_sorted_by_ping() {
+        let mut app = App::new("default".to_string(), "standard".to_string(), vec![], vec![]);
+        app.pings.insert("eu-central-1".to_string(), 25);
+        app.pings.insert("eu-west-1".to_string(), 45);
+        app.pings.insert("us-east-1".to_string(), 105);
+
+        let modal_regs = app.get_modal_regions();
+        assert_eq!(modal_regs[0], "eu-central-1");
+        assert_eq!(modal_regs[1], "eu-west-1");
+        assert_eq!(modal_regs[2], "us-east-1");
+    }
+
+    #[test]
+    fn test_disabled_servers_at_bottom() {
+        let mut app = App::new("ping".to_string(), "standard".to_string(), vec![], vec![]);
+        app.queues = vec![
+            // Disabled server with low ping (15ms)
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "—".to_string(),
+                killer: "—".to_string(),
+            },
+            // Active server with higher ping (80ms)
+            RegionQueueData {
+                flag: "[US]".to_string(),
+                name: "Virginia".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "15s".to_string(),
+                killer: "45s".to_string(),
+            },
+            // Active server with moderate ping (40ms)
+            RegionQueueData {
+                flag: "[IE]".to_string(),
+                name: "Dublin".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "2m".to_string(),
+                killer: "1m".to_string(),
+            },
+        ];
+        app.pings.insert("eu-central-1".to_string(), 15); // Frankfurt (disabled)
+        app.pings.insert("us-east-1".to_string(), 80);    // Virginia (active)
+        app.pings.insert("eu-west-1".to_string(), 40);    // Dublin (active)
+
+        let rows = app.get_filtered_sorted_rows();
+        // Active servers sorted by ping: Dublin (40ms), Virginia (80ms)
+        // Disabled server at the bottom: Frankfurt (15ms)
+        assert_eq!(rows[0].name, "Dublin");
+        assert_eq!(rows[1].name, "Virginia");
+        assert_eq!(rows[2].name, "Frankfurt");
+    }
+}
+

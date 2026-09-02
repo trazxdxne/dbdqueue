@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use regex::Regex;
 use serde::Deserialize;
 
 pub fn get_api_to_aws() -> HashMap<&'static str, &'static str> {
@@ -42,21 +41,21 @@ pub fn get_aws_to_api() -> HashMap<&'static str, &'static str> {
 
 pub fn get_aws_to_flag() -> HashMap<&'static str, &'static str> {
     let mut m = HashMap::new();
-    m.insert("eu-central-1", "🇩🇪");
-    m.insert("eu-west-1", "🇮🇪");
-    m.insert("eu-west-2", "🇬🇧");
-    m.insert("us-east-1", "🇺🇸");
-    m.insert("us-east-2", "🇺🇸");
-    m.insert("us-west-1", "🇺🇸");
-    m.insert("us-west-2", "🇺🇸");
-    m.insert("ca-central-1", "🇨🇦");
-    m.insert("sa-east-1", "🇧🇷");
-    m.insert("ap-south-1", "🇮🇳");
-    m.insert("ap-east-1", "🇭🇰");
-    m.insert("ap-northeast-1", "🇯🇵");
-    m.insert("ap-northeast-2", "🇰🇷");
-    m.insert("ap-southeast-1", "🇸🇬");
-    m.insert("ap-southeast-2", "🇦🇺");
+    m.insert("eu-central-1", "[DE]");
+    m.insert("eu-west-1", "[IE]");
+    m.insert("eu-west-2", "[GB]");
+    m.insert("us-east-1", "[US]");
+    m.insert("us-east-2", "[US]");
+    m.insert("us-west-1", "[US]");
+    m.insert("us-west-2", "[US]");
+    m.insert("ca-central-1", "[CA]");
+    m.insert("sa-east-1", "[BR]");
+    m.insert("ap-south-1", "[IN]");
+    m.insert("ap-east-1", "[HK]");
+    m.insert("ap-northeast-1", "[JP]");
+    m.insert("ap-northeast-2", "[KR]");
+    m.insert("ap-southeast-1", "[SG]");
+    m.insert("ap-southeast-2", "[AU]");
     m
 }
 
@@ -70,26 +69,42 @@ pub struct RegionQueueData {
 }
 
 pub fn parse_time_to_seconds(time_str: &str) -> u32 {
-    if time_str == "—" || time_str.is_empty() {
+    let s = time_str.trim();
+    if s.is_empty() || s == "—" {
         return 999999;
     }
     
-    let re = Regex::new(r"(?:(\d+)m)?(?:(\d+)s)?").unwrap();
-    if let Some(caps) = re.captures(time_str) {
-        let mut total = 0;
-        if let Some(m) = caps.get(1)
-            && let Ok(min) = m.as_str().parse::<u32>() {
-                total += min * 60;
+    let mut total = 0u32;
+    let mut current_num = 0u32;
+    let mut has_num = false;
+
+    for c in s.chars() {
+        if let Some(digit) = c.to_digit(10) {
+            current_num = current_num.saturating_mul(10).saturating_add(digit);
+            has_num = true;
+        } else if c == 'm' || c == 'M' {
+            if has_num {
+                total = total.saturating_add(current_num.saturating_mul(60));
+                current_num = 0;
+                has_num = false;
             }
-        if let Some(s) = caps.get(2)
-            && let Ok(sec) = s.as_str().parse::<u32>() {
-                total += sec;
+        } else if c == 's' || c == 'S' {
+            if has_num {
+                total = total.saturating_add(current_num);
+                current_num = 0;
+                has_num = false;
             }
-        if total > 0 {
-            return total;
         }
     }
-    999999
+    if has_num {
+        total = total.saturating_add(current_num);
+    }
+
+    if total > 0 {
+        total
+    } else {
+        999999
+    }
 }
 
 #[derive(Deserialize, Debug)]

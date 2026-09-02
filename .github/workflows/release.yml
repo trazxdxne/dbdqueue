@@ -54,9 +54,17 @@ jobs:
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/${{ matrix.target }}/release/dbdqueue.exe ${{ matrix.output_name }}
+            if [ -f "target/${{ matrix.target }}/release/dbdq.exe" ]; then
+              cp target/${{ matrix.target }}/release/dbdq.exe ${{ matrix.output_name }}
+            else
+              cp target/${{ matrix.target }}/release/dbdqueue.exe ${{ matrix.output_name }}
+            fi
           else
-            cp target/${{ matrix.target }}/release/dbdqueue ${{ matrix.output_name }}
+            if [ -f "target/${{ matrix.target }}/release/dbdq" ]; then
+              cp target/${{ matrix.target }}/release/dbdq ${{ matrix.output_name }}
+            else
+              cp target/${{ matrix.target }}/release/dbdqueue ${{ matrix.output_name }}
+            fi
           fi
 
       - name: Upload artifact

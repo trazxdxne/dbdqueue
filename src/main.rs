@@ -1,18 +1,20 @@
 mod config;
 mod api;
 mod app;
+mod hosts;
+mod ping;
 mod tui;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::process;
 use crate::app::App;
 use crate::config::{get_config_path, load_config, save_config, migrate_json_if_needed};
 
 #[derive(Parser)]
-#[command(name = "dbdqueue")]
-#[command(about = "Dead by Daylight Queue Times CLI", long_about = None)]
+#[command(name = "dbdq")]
+#[command(about = "Dead by Daylight Queue Times & Region Locker CLI", long_about = None)]
 struct Cli {
-    #[arg(short, long, value_parser = ["survivor", "killer", "priority", "default"], help = "Sort output by column/rules (persists in config)")]
+    #[arg(short, long, value_parser = ["survivor", "killer", "ping", "priority", "default"], help = "Sort output by column/rules (persists in config)")]
     sort: Option<String>,
 
     #[arg(short, long, value_parser = ["standard", "event", "both"], help = "Filter rows by Mode")]
@@ -20,6 +22,20 @@ struct Cli {
 
     #[arg(short, long, num_args = 0.., help = "Set priority regions in config (comma or space separated)")]
     priority: Option<Vec<String>>,
+
+    #[command(subcommand)]
+    command: Option<Commands>,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    #[command(about = "Lock regions (blocking all others)")]
+    Lock {
+        #[arg(num_args = 0.., help = "Regions to whitelist (leave empty for interactive menu)")]
+        regions: Vec<String>,
+    },
+    #[command(about = "Unlock all regions")]
+    Unlock,
 }
 
 pub fn parse_priority_input(words_list: &[String]) -> Vec<String> {
@@ -114,7 +130,8 @@ fn main() {
     let mut config_changed = false;
     
     if let Some(ref s) = args.sort {
-        config.sort = s.clone();
+        let sort_val = if s == "priority" { "ping" } else { s.as_str() };
+        config.sort = sort_val.to_string();
         config_changed = true;
     }
     
@@ -124,7 +141,14 @@ fn main() {
     }
     
     if let Some(ref p) = args.priority {
-        let priorities = parse_priority_input(p);
+        let priorities = if p.is_empty() {
+            match hosts::interactive_priority_menu(&config.priority) {
+                Some(prio) => prio,
+                None => process::exit(0),
+            }
+        } else {
+            parse_priority_input(p)
+        };
         config.priority = priorities.clone();
         config_changed = true;
     }
@@ -134,11 +158,56 @@ fn main() {
             eprintln!("Failed to save config: {}", e);
         }
     
-    let active_sort = args.sort.unwrap_or(config.sort);
+    // Process subcommands
+    if let Some(ref cmd) = args.command {
+        match cmd {
+            Commands::Lock { regions } => {
+                let resolved_regions = if regions.is_empty() {
+                    match hosts::interactive_lock_menu(&config.locked) {
+                        Some(regs) => regs,
+                        None => process::exit(0),
+                    }
+                } else {
+                    let mut resolved = Vec::new();
+                    let api_to_aws = crate::api::get_api_to_aws();
+                    let input_resolved = parse_priority_input(regions);
+                    for r in input_resolved {
+                        if let Some(aws_code) = api_to_aws.get(r.as_str()) {
+                            resolved.push(aws_code.to_string());
+                        } else if crate::api::get_all_aws_regions().contains(&r.as_str()) {
+                            resolved.push(r);
+                        }
+                    }
+                    resolved
+                };
+                
+                config.locked = resolved_regions.clone();
+                if let Err(e) = save_config(&config_path, &config) {
+                    eprintln!("Failed to save config: {}", e);
+                }
+                hosts::update_hosts(Some(&resolved_regions), true);
+                process::exit(0);
+            }
+            Commands::Unlock => {
+                config.locked = vec![];
+                if let Err(e) = save_config(&config_path, &config) {
+                    eprintln!("Failed to save config: {}", e);
+                }
+                hosts::update_hosts(None, true);
+                process::exit(0);
+            }
+        }
+    }
+    
+    let mut active_sort = args.sort.unwrap_or(config.sort);
+    if active_sort == "priority" {
+        active_sort = "ping".to_string();
+    }
     let active_mode = args.mode.unwrap_or(config.mode);
     let active_priority = config.priority;
+    let active_locked = config.locked;
     
-    let mut app = App::new(active_sort, active_mode, active_priority);
+    let mut app = App::new(active_sort, active_mode, active_priority, active_locked);
     
     // Initial fetch to show data immediately
     if let Ok((queues, updated)) = api::fetch_queue_times() {

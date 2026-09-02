@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-REPO="trazxdxne/dbdqueue" # Change this to the actual GitHub username/repo
+REPO="trazxdxne/dbdqueue"
 BINARY_NAME="dbdqueue"
 
 # Colors for terminal output
@@ -36,24 +36,8 @@ case "$ARCH" in
         ;;
 esac
 
-# 3. Get latest release version
-echo "${BLUE}==>${NC} Checking latest version from GitHub..."
-LATEST_RELEASE=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep -oP '"tag_name": "\K[^"]+' || true)
-
-if [ -z "$LATEST_RELEASE" ]; then
-    # Fallback to scraping releases if GitHub API limits are hit
-    LATEST_RELEASE=$(curl -s "https://github.com/$REPO/releases" | grep -oP 'releases/tag/\K[a-zA-Z0-9.-]+' | head -n 1 || true)
-fi
-
-if [ -z "$LATEST_RELEASE" ]; then
-    echo "${RED}Error:${NC} Could not determine the latest release version."
-    exit 1
-fi
-
-echo "${BLUE}==>${NC} Found version $LATEST_RELEASE"
-
-# 4. Download binary
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$LATEST_RELEASE/dbdqueue-linux-$SUFFIX"
+# 3. Download binary
+DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/dbdqueue-linux-$SUFFIX"
 TEMP_FILE=$(mktemp)
 
 echo "${BLUE}==>${NC} Downloading binary from $DOWNLOAD_URL..."
@@ -65,11 +49,11 @@ fi
 
 chmod +x "$TEMP_FILE"
 
-# 5. Determine installation folder
+# 4. Determine installation folder
 INSTALL_DIR="/usr/local/bin"
 USE_SUDO=""
 
-# If /usr/local/bin is not writable by current user, we check if we have sudo or if we should use ~/.local/bin
+# If /usr/local/bin is not writable by current user, check if sudo is available or fallback to ~/.local/bin
 if [ ! -w "$INSTALL_DIR" ]; then
     if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
         USE_SUDO="sudo"
@@ -80,11 +64,13 @@ if [ ! -w "$INSTALL_DIR" ]; then
     fi
 fi
 
-echo "${BLUE}==>${NC} Installing to $INSTALL_DIR/$BINARY_NAME..."
-$USE_SUDO mv "$TEMP_FILE" "$INSTALL_DIR/$BINARY_NAME"
+echo "${BLUE}==>${NC} Installing to $INSTALL_DIR/dbdq and $INSTALL_DIR/dbdqueue..."
+$USE_SUDO cp "$TEMP_FILE" "$INSTALL_DIR/dbdq"
+$USE_SUDO mv "$TEMP_FILE" "$INSTALL_DIR/dbdqueue"
+$USE_SUDO chmod +x "$INSTALL_DIR/dbdq" "$INSTALL_DIR/dbdqueue"
 
 echo "${GREEN}==>${NC} dbdqueue has been installed successfully!"
-echo "You can now run it by typing: ${YELLOW}dbdqueue${NC}"
+echo "You can now run it anytime by typing: ${YELLOW}dbdq${NC} or ${YELLOW}dbdqueue${NC}"
 
 # Verify if PATH contains the directory
 case ":$PATH:" in
@@ -93,3 +79,12 @@ case ":$PATH:" in
         echo "${YELLOW}Warning:${NC} $INSTALL_DIR is not in your PATH. You may need to add it to your shell config."
         ;;
 esac
+
+# Launch dbdq if running in an interactive terminal
+if [ -c /dev/tty ]; then
+    echo "${BLUE}==>${NC} Launching dbdqueue..."
+    exec "$INSTALL_DIR/dbdq" < /dev/tty
+elif [ -t 0 ]; then
+    echo "${BLUE}==>${NC} Launching dbdqueue..."
+    exec "$INSTALL_DIR/dbdq"
+fi

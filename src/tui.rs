@@ -12,6 +12,7 @@ pub enum AppEvent {
     Input(KeyCode),
     Tick,
     ApiUpdate(Result<(Vec<crate::api::RegionQueueData>, i64), String>),
+    PingUpdate(std::collections::HashMap<String, u32>),
 }
 
 pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -35,7 +36,9 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
 
             if event::poll(timeout).unwrap_or(false)
                 && let Ok(Event::Key(key)) = event::read() {
-                    tx_input.send(AppEvent::Input(key.code)).unwrap_or(());
+                    if key.kind == crossterm::event::KeyEventKind::Press || key.kind == crossterm::event::KeyEventKind::Repeat {
+                        tx_input.send(AppEvent::Input(key.code)).unwrap_or(());
+                    }
                 }
 
             if last_tick.elapsed() >= tick_rate {
@@ -55,31 +58,56 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
         }
     });
 
+    // Ping thread (every 60s)
+    let tx_ping = tx.clone();
+    thread::spawn(move || {
+        loop {
+            let pings = crate::ping::measure_all_regions_ping();
+            tx_ping.send(AppEvent::PingUpdate(pings)).unwrap_or(());
+            thread::sleep(Duration::from_secs(60));
+        }
+    });
+
     loop {
         terminal.draw(|f| crate::app::draw(f, &mut app))?;
 
-        if let Ok(event) = rx.recv() {
-            match event {
-                AppEvent::Input(key) => match key {
-                    KeyCode::Char(c) => app.handle_key(c),
-                    KeyCode::Up => app.previous(),
-                    KeyCode::Down => app.next(),
-                    KeyCode::Esc => app.should_quit = true,
-                    _ => {}
-                },
-                AppEvent::Tick => {}
-                AppEvent::ApiUpdate(res) => {
-                    app.is_fetching = false;
-                    match res {
-                        Ok((queues, last_updated)) => {
-                            app.queues = queues;
-                            app.api_last_updated = last_updated;
-                            app.error_msg = None;
-                        }
-                        Err(e) => {
-                            app.error_msg = Some(e);
+        if let Ok(mut event) = rx.recv() {
+            loop {
+                match event {
+                    AppEvent::Input(key) => match key {
+                        KeyCode::Char(c) => app.handle_key(c),
+                        KeyCode::Up => app.handle_up(),
+                        KeyCode::Down => app.handle_down(),
+                        KeyCode::Enter => app.handle_enter(),
+                        KeyCode::Esc => app.handle_esc(),
+                        _ => {}
+                    },
+                    AppEvent::Tick => {}
+                    AppEvent::ApiUpdate(res) => {
+                        app.is_fetching = false;
+                        match res {
+                            Ok((queues, last_updated)) => {
+                                app.queues = queues;
+                                app.api_last_updated = last_updated;
+                                app.error_msg = None;
+                            }
+                            Err(e) => {
+                                app.error_msg = Some(e);
+                            }
                         }
                     }
+                    AppEvent::PingUpdate(pings) => {
+                        app.pings = pings;
+                    }
+                }
+
+                if app.should_quit {
+                    break;
+                }
+
+                match rx.try_recv() {
+                    Ok(next) => event = next,
+                    Err(_) => break,
                 }
             }
         }

@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-02
+
+### Added
+- Multi-layout keyboard support: all keyboard shortcuts now work seamlessly across any layout, including Russian (Cyrillic to QWERTY mapping).
+- Ping-based sorting (`--sort ping`, `P` shortcut in TUI), replacing the legacy priority sort.
+- Region Locker modal is now always sorted by ping ascending (lowest ping first).
+
+### Fixed
+- Fixed bug where raw `println!` messages from hosts updater leaked onto the TUI screen and broke layout boundaries.
+- Replaced quit shortcut `q` with `Esc` for both the main dashboard and closing modals.
+- Cleaned up table clutter by removing repetitive `[BLOCKED]` indicators, displaying only `[LOCKED]` on whitelisted regions.
+- Regions with no active matchmaking queues are now completely dimmed in dark gray, with unmeasured ping hidden (`—`).
+
+### Performance
+- Fixed sluggish navigation when holding arrow keys on Windows by supporting `KeyEventKind::Repeat` and batch-draining pending input events before redraws.
+- Replaced dynamic regex parsing with an optimized, zero-allocation time parser.
+
 ## [0.3.1] - 2026-06-15
 
 ### Fixed
