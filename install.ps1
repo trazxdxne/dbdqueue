@@ -22,7 +22,7 @@ Write-Host "==> Downloading latest binary..." -ForegroundColor Cyan
 try {
     Invoke-WebRequest -Uri $downloadUrl -OutFile $tempFile -UseBasicParsing
 } catch {
-    Write-Error "Failed to download binary from $downloadUrl: $_"
+    Write-Error ("Failed to download binary from " + $downloadUrl + ": " + $_)
     exit 1
 }
 
@@ -43,7 +43,7 @@ try {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     if ($userPath -notlike "*$installDir*") {
         Write-Host "==> Adding $installDir to User PATH..." -ForegroundColor Cyan
-        $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $installDir } else { "$userPath;$installDir" }
+        $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) { $installDir } else { "${userPath};${installDir}" }
         [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
     }
 } catch {
@@ -51,7 +51,7 @@ try {
 }
 
 if ($env:Path -notlike "*$installDir*") {
-    $env:Path = "$installDir;$env:Path"
+    $env:Path = "${installDir};$env:Path"
 }
 
 Write-Host "==> dbdqueue installed successfully!" -ForegroundColor Green
