@@ -410,8 +410,13 @@ fn run_interactive_menu(
 
 pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     let is_ru = is_russian();
+    let queues = crate::api::fetch_queue_times().map(|(q, _)| q).unwrap_or_default();
+    let disabled = crate::api::get_disabled_aws_regions(&queues);
     let pings = crate::ping::measure_all_regions_ping();
-    let mut aws_regions = crate::api::get_all_aws_regions();
+    let mut aws_regions: Vec<&'static str> = crate::api::get_all_aws_regions()
+        .into_iter()
+        .filter(|reg| !disabled.contains(*reg))
+        .collect();
     aws_regions.sort_by(|&a, &b| {
         let a_ping = pings.get(a).copied().unwrap_or(u32::MAX);
         let b_ping = pings.get(b).copied().unwrap_or(u32::MAX);
@@ -430,20 +435,21 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
         .map(|code| {
             let name = aws_to_api.get(*code).unwrap_or(code);
             let flag = aws_to_flag.get(*code).unwrap_or(&"");
+            let flag_str = if flag.is_empty() { String::new() } else { format!("{} ", flag) };
             let ping_str = if let Some(&ms) = pings.get(*code) {
                 format!(" - {} ms", ms)
             } else {
                 String::new()
             };
-            (format!("{}{} ({}){}", flag, name, code, ping_str), code.to_string())
+            (format!("{}{}{} ({}){}", flag_str, name, "", code, ping_str), code.to_string())
         })
         .collect();
         
     let title = if is_ru { "Блокировка регионов" } else { "Region Locker" };
     let instructions = if is_ru {
-        "\x1b[91m[↑↓]\x1b[0m \x1b[90mВыбор\x1b[0m  \x1b[91m[Пробел]\x1b[0m \x1b[90mВкл/Выкл\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mСохранить\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mОтмена\x1b[0m"
+        "\x1b[91m[↑↓]\x1b[0m Выбор  \x1b[91m[Пробел]\x1b[0m Вкл/Выкл  \x1b[91m[Enter]\x1b[0m Сохранить  \x1b[91m[Esc]\x1b[0m Отмена"
     } else {
-        "\x1b[91m[↑↓]\x1b[0m \x1b[90mSelect\x1b[0m  \x1b[91m[Space]\x1b[0m \x1b[90mToggle\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mSave\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mCancel\x1b[0m"
+        "\x1b[91m[↑↓]\x1b[0m Select  \x1b[91m[Space]\x1b[0m Toggle  \x1b[91m[Enter]\x1b[0m Save  \x1b[91m[Esc]\x1b[0m Cancel"
     };
         
     run_interactive_menu(
@@ -455,8 +461,14 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
 }
 
 pub fn interactive_priority_menu(current_priority: &[String]) -> Option<Vec<String>> {
+    let queues = crate::api::fetch_queue_times().map(|(q, _)| q).unwrap_or_default();
+    let disabled = crate::api::get_disabled_aws_regions(&queues);
     let api_to_aws = crate::api::get_api_to_aws();
-    let mut regions: Vec<String> = api_to_aws.keys().map(|s| s.to_string()).collect();
+    let mut regions: Vec<String> = api_to_aws
+        .iter()
+        .filter(|(_, code)| !disabled.contains(**code))
+        .map(|(name, _)| name.to_string())
+        .collect();
     regions.sort();
     
     let options: Vec<(String, String)> = regions.iter()
@@ -466,9 +478,9 @@ pub fn interactive_priority_menu(current_priority: &[String]) -> Option<Vec<Stri
     let is_ru = is_russian();
     let title = if is_ru { "Приоритетные регионы" } else { "Priority Regions" };
     let instructions = if is_ru {
-        "\x1b[91m[↑↓]\x1b[0m \x1b[90mВыбор\x1b[0m  \x1b[91m[Пробел]\x1b[0m \x1b[90mВкл/Выкл\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mСохранить\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mОтмена\x1b[0m"
+        "\x1b[91m[↑↓]\x1b[0m Выбор  \x1b[91m[Пробел]\x1b[0m Вкл/Выкл  \x1b[91m[Enter]\x1b[0m Сохранить  \x1b[91m[Esc]\x1b[0m Отмена"
     } else {
-        "\x1b[91m[↑↓]\x1b[0m \x1b[90mSelect\x1b[0m  \x1b[91m[Space]\x1b[0m \x1b[90mToggle\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mSave\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mCancel\x1b[0m"
+        "\x1b[91m[↑↓]\x1b[0m Select  \x1b[91m[Space]\x1b[0m Toggle  \x1b[91m[Enter]\x1b[0m Save  \x1b[91m[Esc]\x1b[0m Cancel"
     };
         
     run_interactive_menu(

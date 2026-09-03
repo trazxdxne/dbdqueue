@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-09-03
+
+### Fixed
+- Filtered out disabled matchmaking servers from both the `[L]` Region Locker modal and `dbdq lock` CLI menu.
+- Fixed hotkey text color in the Region Locker modal and CLI interactive menu to match default terminal text color.
+- Cleaned up Region Locker modal title by removing `(select whitelisted)` text.
+- Added missing space after region flag brackets in `dbdq lock` CLI menu.
+
 ## [0.5.3] - 2026-09-03
 
 ### Changed

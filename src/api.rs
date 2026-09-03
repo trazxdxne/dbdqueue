@@ -59,6 +59,19 @@ pub fn get_aws_to_flag() -> HashMap<&'static str, &'static str> {
     m
 }
 
+pub fn get_disabled_aws_regions(queues: &[RegionQueueData]) -> std::collections::HashSet<String> {
+    let api_to_aws = get_api_to_aws();
+    let mut disabled = std::collections::HashSet::new();
+    for q in queues {
+        if q.mode == "Standard" && q.survivor == "—" && q.killer == "—" {
+            if let Some(code) = api_to_aws.get(q.name.as_str()) {
+                disabled.insert(code.to_string());
+            }
+        }
+    }
+    disabled
+}
+
 #[derive(Debug, Clone)]
 pub struct RegionQueueData {
     pub flag: String,
@@ -315,5 +328,28 @@ mod tests {
         assert!(res.is_err());
         let err = res.err().unwrap();
         assert!(err.contains("Empty response received"));
+    }
+
+    #[test]
+    fn test_get_disabled_aws_regions() {
+        let queues = vec![
+            RegionQueueData {
+                flag: "[GB]".to_string(),
+                name: "London".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "—".to_string(),
+                killer: "—".to_string(),
+            },
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "15s".to_string(),
+                killer: "30s".to_string(),
+            },
+        ];
+        let disabled = get_disabled_aws_regions(&queues);
+        assert!(disabled.contains("eu-west-2"));
+        assert!(!disabled.contains("eu-central-1"));
     }
 }

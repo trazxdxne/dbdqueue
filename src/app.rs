@@ -138,7 +138,11 @@ impl App {
     }
 
     pub fn get_modal_regions(&self) -> Vec<&'static str> {
-        let mut regions = crate::api::get_all_aws_regions();
+        let disabled = crate::api::get_disabled_aws_regions(&self.queues);
+        let mut regions: Vec<&'static str> = crate::api::get_all_aws_regions()
+            .into_iter()
+            .filter(|reg| !disabled.contains(*reg))
+            .collect();
         regions.sort_by(|&a, &b| {
             let a_ping = self.pings.get(a).copied().unwrap_or(u32::MAX);
             let b_ping = self.pings.get(b).copied().unwrap_or(u32::MAX);
@@ -614,9 +618,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         f.render_widget(Clear, area);
         
         let modal_title = if is_ru {
-            " Блокировка Регионов (выберите разрешенные) "
+            " Блокировка регионов "
         } else {
-            " Region Locker (select whitelisted) "
+            " Region Locker "
         };
         
         let (select_txt, toggle_txt, apply_txt, cancel_txt) = if is_ru {
@@ -627,13 +631,13 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
         let modal_instructions = Line::from(vec![
             Span::styled(" [↑↓] ", Style::default().fg(Color::LightRed)),
-            Span::styled(select_txt, Style::default().fg(Color::DarkGray)),
+            Span::raw(select_txt),
             Span::styled("  [Space] ", Style::default().fg(Color::LightRed)),
-            Span::styled(toggle_txt, Style::default().fg(Color::DarkGray)),
+            Span::raw(toggle_txt),
             Span::styled("  [Enter] ", Style::default().fg(Color::LightRed)),
-            Span::styled(apply_txt, Style::default().fg(Color::DarkGray)),
+            Span::raw(apply_txt),
             Span::styled("  [Esc] ", Style::default().fg(Color::LightRed)),
-            Span::styled(cancel_txt, Style::default().fg(Color::DarkGray)),
+            Span::raw(cancel_txt),
         ]);
         
         let modal_regions = app.get_modal_regions();
@@ -643,6 +647,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let items: Vec<ListItem> = modal_regions.iter().enumerate().map(|(idx, code)| {
             let name = aws_to_api.get(*code).unwrap_or(code);
             let flag = aws_to_flag.get(*code).unwrap_or(&"");
+            let flag_str = if flag.is_empty() { String::new() } else { format!("{} ", flag) };
             let is_selected = app.lock_modal_selected.iter().any(|r| r == *code);
             
             let checkbox = if is_selected { "[*] " } else { "[ ] " };
@@ -653,7 +658,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                 String::new()
             };
             
-            let text = format!("{}{} {} ({}){}", checkbox, flag, name, code, ping_str);
+            let text = format!("{}{}{} ({}){}", checkbox, flag_str, name, code, ping_str);
             
             let mut style = if is_selected {
                 Style::default().fg(Color::Green)
@@ -781,6 +786,30 @@ mod tests {
         assert_eq!(modal_regs[0], "eu-central-1");
         assert_eq!(modal_regs[1], "eu-west-1");
         assert_eq!(modal_regs[2], "us-east-1");
+    }
+
+    #[test]
+    fn test_modal_regions_filter_disabled() {
+        let mut app = App::new("default".to_string(), "standard".to_string(), vec![], vec![]);
+        app.queues = vec![
+            RegionQueueData {
+                flag: "[GB]".to_string(),
+                name: "London".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "—".to_string(),
+                killer: "—".to_string(),
+            },
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "15s".to_string(),
+                killer: "30s".to_string(),
+            },
+        ];
+        let modal_regs = app.get_modal_regions();
+        assert!(!modal_regs.contains(&"eu-west-2")); // London is disabled
+        assert!(modal_regs.contains(&"eu-central-1")); // Frankfurt is active
     }
 
     #[test]
