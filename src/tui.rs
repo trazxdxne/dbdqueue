@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::{io, time::Duration};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
@@ -17,9 +18,13 @@ pub enum AppEvent {
         api_res: Result<(Vec<crate::api::RegionQueueData>, i64), String>,
         ping_res: std::collections::HashMap<String, u32>,
     },
+    HostsUpdateComplete {
+        result: crate::hosts::UpdateHostsResult,
+        locked: Vec<String>,
+    },
 }
 
-pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -39,11 +44,11 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
                 .unwrap_or_else(|| Duration::from_secs(0));
 
             if event::poll(timeout).unwrap_or(false)
-                && let Ok(Event::Key(key)) = event::read() {
-                    if key.kind == crossterm::event::KeyEventKind::Press || key.kind == crossterm::event::KeyEventKind::Repeat {
-                        tx_input.send(AppEvent::Input(key.code)).unwrap_or(());
-                    }
-                }
+                && let Ok(Event::Key(key)) = event::read()
+                && (key.kind == crossterm::event::KeyEventKind::Press || key.kind == crossterm::event::KeyEventKind::Repeat)
+            {
+                tx_input.send(AppEvent::Input(key.code)).unwrap_or(());
+            }
 
             if last_tick.elapsed() >= tick_rate {
                 tx_input.send(AppEvent::Tick).unwrap_or(());
@@ -72,75 +77,71 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
         }
     });
 
+    let dispatch_action = |action: crate::app::AppAction, app: &mut crate::app::App, tx: &mpsc::Sender<AppEvent>| {
+        match action {
+            crate::app::AppAction::None => {}
+            crate::app::AppAction::Refresh => {
+                let tx_refresh = tx.clone();
+                thread::spawn(move || {
+                    let api_handle = thread::spawn(crate::api::fetch_queue_times);
+                    let ping_handle = thread::spawn(crate::ping::measure_all_regions_ping);
+                    let api_res = api_handle.join().unwrap_or_else(|_| Err("API fetch thread error".to_string()));
+                    let ping_res = ping_handle.join().unwrap_or_default();
+                    tx_refresh.send(AppEvent::ManualRefreshComplete { api_res, ping_res }).unwrap_or(());
+                });
+            }
+            crate::app::AppAction::SaveConfig(cfg) => {
+                if let Err(e) = crate::config::save_config(&config_path, &cfg) {
+                    let prefix = crate::i18n::tr(app.locale, crate::i18n::TextKey::ErrorConfigSave);
+                    app.notice = Some(crate::app::Notice::error(format!("{}: {}", prefix, e)));
+                }
+            }
+            crate::app::AppAction::ApplyLocks(regions) => {
+                let tx_hosts = tx.clone();
+                thread::spawn(move || {
+                    let lock_target = if regions.is_empty() { None } else { Some(regions.as_slice()) };
+                    let res = crate::hosts::update_hosts(lock_target, false);
+                    tx_hosts.send(AppEvent::HostsUpdateComplete { result: res, locked: regions }).unwrap_or(());
+                });
+            }
+        }
+    };
+
     loop {
-        terminal.draw(|f| crate::app::draw(f, &mut app))?;
+        terminal.draw(|f| crate::ui::draw(f, &mut app))?;
 
         if let Ok(mut event) = rx.recv() {
             loop {
                 match event {
                     AppEvent::Input(key) => match key {
                         KeyCode::Char(c) => {
-                            if app.handle_key(c) == crate::app::AppAction::Refresh {
-                                let tx_refresh = tx.clone();
-                                thread::spawn(move || {
-                                    let api_handle = thread::spawn(|| crate::api::fetch_queue_times());
-                                    let ping_handle = thread::spawn(|| crate::ping::measure_all_regions_ping());
-                                    let api_res = api_handle.join().unwrap_or_else(|_| Err("API fetch thread error".to_string()));
-                                    let ping_res = ping_handle.join().unwrap_or_default();
-                                    tx_refresh.send(AppEvent::ManualRefreshComplete { api_res, ping_res }).unwrap_or(());
-                                });
-                            }
+                            let action = app.handle_key(c);
+                            dispatch_action(action, &mut app, &tx);
                         }
                         KeyCode::Up => app.handle_up(),
                         KeyCode::Down => app.handle_down(),
-                        KeyCode::Enter => app.handle_enter(),
+                        KeyCode::Enter => {
+                            let action = app.handle_enter();
+                            dispatch_action(action, &mut app, &tx);
+                        }
                         KeyCode::Esc => app.handle_esc(),
                         _ => {}
                     },
                     AppEvent::Tick => {
-                        app.on_tick();
+                        app.on_tick(std::time::Instant::now());
                     }
                     AppEvent::ManualRefreshComplete { api_res, ping_res } => {
-                        app.is_fetching = false;
-                        app.status_msg = None;
-                        app.pings = ping_res;
-                        match api_res {
-                            Ok((queues, last_updated)) => {
-                                let is_same = app.api_last_updated == last_updated && !app.queues.is_empty();
-                                app.queues = queues;
-                                app.api_last_updated = last_updated;
-                                app.error_msg = None;
-                                let is_ru = std::env::var("LANG").unwrap_or_default().to_lowercase().starts_with("ru")
-                                    || std::env::var("LC_ALL").unwrap_or_default().to_lowercase().starts_with("ru")
-                                    || std::env::var("LC_MESSAGES").unwrap_or_default().to_lowercase().starts_with("ru");
-                                let feedback = if is_same {
-                                    if is_ru { "[✓ Актуально]" } else { "[✓ Up to date]" }
-                                } else {
-                                    if is_ru { "[✓ Обновлено]" } else { "[✓ Updated]" }
-                                };
-                                app.refresh_feedback = Some((feedback.to_string(), std::time::Instant::now()));
-                            }
-                            Err(e) => {
-                                app.error_msg = Some(e);
-                            }
-                        }
+                        app.handle_manual_refresh_complete(api_res, ping_res, std::time::Instant::now());
+                    }
+                    AppEvent::HostsUpdateComplete { result, locked } => {
+                        let action = app.handle_hosts_result(result, locked, std::time::Instant::now());
+                        dispatch_action(action, &mut app, &tx);
                     }
                     AppEvent::ApiUpdate(res) => {
-                        match res {
-                            Ok((queues, last_updated)) => {
-                                app.queues = queues;
-                                app.api_last_updated = last_updated;
-                                app.error_msg = None;
-                            }
-                            Err(e) => {
-                                if app.queues.is_empty() {
-                                    app.error_msg = Some(e);
-                                }
-                            }
-                        }
+                        app.handle_api_update(res);
                     }
                     AppEvent::PingUpdate(pings) => {
-                        app.pings = pings;
+                        app.handle_ping_update(pings);
                     }
                 }
 

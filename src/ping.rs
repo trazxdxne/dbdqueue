@@ -51,17 +51,16 @@ pub fn measure_all_regions_ping() -> HashMap<String, u32> {
             let results_clone = Arc::clone(&results);
             s.spawn(move || {
                 let timeout = Duration::from_millis(2500);
-                if let Some(ms) = ping_aws_region(&reg_str, timeout) {
-                    if let Ok(mut map) = results_clone.lock() {
-                        map.insert(reg_str, ms);
-                    }
+                if let Some(ms) = ping_aws_region(&reg_str, timeout)
+                    && let Ok(mut map) = results_clone.lock()
+                {
+                    map.insert(reg_str, ms);
                 }
             });
         }
     });
     
-    let res = results.lock().unwrap().clone();
-    res
+    results.lock().unwrap().clone()
 }
 
 pub fn color_for_ping(ms: Option<u32>) -> Color {

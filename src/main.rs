@@ -1,14 +1,16 @@
-mod config;
 mod api;
 mod app;
+mod config;
 mod hosts;
+mod i18n;
 mod ping;
 mod tui;
+mod ui;
 
 use clap::{Parser, Subcommand};
 use std::process;
 use crate::app::App;
-use crate::config::{get_config_path, load_config, save_config, migrate_json_if_needed};
+use crate::config::{get_config_path, load_config, migrate_json_if_needed, save_config, GameMode, SortOrder};
 
 #[derive(Parser)]
 #[command(name = "dbdq")]
@@ -130,13 +132,23 @@ fn main() {
     let mut config_changed = false;
     
     if let Some(ref s) = args.sort {
-        let sort_val = if s == "priority" { "ping" } else { s.as_str() };
-        config.sort = sort_val.to_string();
+        let sort_val = match s.to_lowercase().as_str() {
+            "killer" => SortOrder::Killer,
+            "survivor" => SortOrder::Survivor,
+            "ping" | "priority" => SortOrder::Ping,
+            _ => SortOrder::Default,
+        };
+        config.sort = sort_val;
         config_changed = true;
     }
     
     if let Some(ref m) = args.mode {
-        config.mode = m.clone();
+        let mode_val = match m.to_lowercase().as_str() {
+            "event" => GameMode::Event,
+            "both" => GameMode::Both,
+            _ => GameMode::Standard,
+        };
+        config.mode = mode_val;
         config_changed = true;
     }
     
@@ -149,7 +161,7 @@ fn main() {
         } else {
             parse_priority_input(p)
         };
-        config.priority = priorities.clone();
+        config.priority = priorities;
         config_changed = true;
     }
     
@@ -199,24 +211,24 @@ fn main() {
         }
     }
     
-    let mut active_sort = args.sort.unwrap_or(config.sort);
-    if active_sort == "priority" {
-        active_sort = "ping".to_string();
-    }
-    let active_mode = args.mode.unwrap_or(config.mode);
-    let active_priority = config.priority;
-    let active_locked = config.locked;
-    
-    let mut app = App::new(active_sort, active_mode, active_priority, active_locked);
+    let mut app = App::new(
+        config.sort,
+        config.mode,
+        config.priority,
+        config.locked,
+        config.lang,
+        config.api_url,
+    );
     
     // Initial fetch to show data immediately
     if let Ok((queues, updated)) = api::fetch_queue_times() {
         app.queues = queues;
         app.api_last_updated = updated;
         app.is_fetching = false;
+        app.clamp_selection();
     }
     
-    if let Err(e) = tui::run_app(app) {
+    if let Err(e) = tui::run_app(app, config_path) {
         eprintln!("Error running TUI: {}", e);
         process::exit(1);
     }

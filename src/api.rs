@@ -1,7 +1,8 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 use serde::Deserialize;
 
-pub fn get_api_to_aws() -> HashMap<&'static str, &'static str> {
+pub static API_TO_AWS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert("Frankfurt", "eu-central-1");
     m.insert("Dublin", "eu-west-1");
@@ -19,6 +20,10 @@ pub fn get_api_to_aws() -> HashMap<&'static str, &'static str> {
     m.insert("Singapore", "ap-southeast-1");
     m.insert("Sydney", "ap-southeast-2");
     m
+});
+
+pub fn get_api_to_aws() -> &'static HashMap<&'static str, &'static str> {
+    &API_TO_AWS
 }
 
 pub fn get_all_aws_regions() -> Vec<&'static str> {
@@ -31,15 +36,19 @@ pub fn get_all_aws_regions() -> Vec<&'static str> {
     ]
 }
 
-pub fn get_aws_to_api() -> HashMap<&'static str, &'static str> {
+pub static AWS_TO_API: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
-    for (k, v) in get_api_to_aws() {
+    for (&k, &v) in API_TO_AWS.iter() {
         m.insert(v, k);
     }
     m
+});
+
+pub fn get_aws_to_api() -> &'static HashMap<&'static str, &'static str> {
+    &AWS_TO_API
 }
 
-pub fn get_aws_to_flag() -> HashMap<&'static str, &'static str> {
+pub static AWS_TO_FLAG: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert("eu-central-1", "[DE]");
     m.insert("eu-west-1", "[IE]");
@@ -57,16 +66,19 @@ pub fn get_aws_to_flag() -> HashMap<&'static str, &'static str> {
     m.insert("ap-southeast-1", "[SG]");
     m.insert("ap-southeast-2", "[AU]");
     m
+});
+
+pub fn get_aws_to_flag() -> &'static HashMap<&'static str, &'static str> {
+    &AWS_TO_FLAG
 }
 
 pub fn get_disabled_aws_regions(queues: &[RegionQueueData]) -> std::collections::HashSet<String> {
-    let api_to_aws = get_api_to_aws();
     let mut disabled = std::collections::HashSet::new();
     for q in queues {
-        if q.mode == "Standard" && q.survivor == "—" && q.killer == "—" {
-            if let Some(code) = api_to_aws.get(q.name.as_str()) {
-                disabled.insert(code.to_string());
-            }
+        if q.mode == "Standard" && q.is_disabled()
+            && let Some(code) = API_TO_AWS.get(q.name.as_str())
+        {
+            disabled.insert(code.to_string());
         }
     }
     disabled
@@ -79,6 +91,12 @@ pub struct RegionQueueData {
     pub mode: String, // "Standard" or "Event"
     pub survivor: String,
     pub killer: String,
+}
+
+impl RegionQueueData {
+    pub fn is_disabled(&self) -> bool {
+        self.survivor == "—" && self.killer == "—"
+    }
 }
 
 pub fn parse_time_to_seconds(time_str: &str) -> u32 {
@@ -101,12 +119,10 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
                 current_num = 0;
                 has_num = false;
             }
-        } else if c == 's' || c == 'S' {
-            if has_num {
-                total = total.saturating_add(current_num);
-                current_num = 0;
-                has_num = false;
-            }
+        } else if (c == 's' || c == 'S') && has_num {
+            total = total.saturating_add(current_num);
+            current_num = 0;
+            has_num = false;
         }
     }
     if has_num {

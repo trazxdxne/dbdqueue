@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-04
+
+### Changed
+- Refactored `app.rs` architecture: separated state machine (`app.rs`), rendering (`ui.rs`), and localization (`i18n.rs`).
+- `App` is now a pure state machine with zero disk, network, or hosts I/O; all side-effects are communicated via `AppAction` and handled in the event loop.
+- Replaced string representations for sort order and game mode with typed enums (`SortOrder`, `GameMode`) in `config.rs`, backed by backward-compatible deserialization and exhaustive pattern matching.
+- Optimized performance hot paths: row data is referenced rather than cloned each frame, timestamps are parsed once via cached sorting keys, and static region maps are cached using `LazyLock`.
+- Locked regions stored in a `HashSet` for $O(1)$ lookup complexity.
+- Hosts updates now execute off the UI thread so Windows UAC elevation prompts do not freeze UI rendering.
+- Layout responsiveness: removed full-screen `Clear`, clamped table height dynamically to available screen space to prevent pushing the footer off small terminals, and replaced magic numbers with named constants.
+
+### Added
+- Centralized `i18n.rs` localization supporting English and Russian, with configurable `lang` in `AppConfig` (`auto`, `en`, `ru`) resolving system locale via `sys-locale` and environment variables (`LC_ALL` > `LC_MESSAGES` > `LANG`).
+- Unified `Notice` system (`Error`, `Info`, `Success`) with injected-time expiration testing.
+
+### Fixed
+- **UX Fix 1**: Renamed main dashboard footer label `[↑↓] Scroll` to `[↑↓] Select` (and Russian `[↑↓] Выбор`) for consistency with the lock modal.
+- **UX Fix 2**: Styled modal action labels with red brackets and default foreground text, preventing border color bleed.
+- **UX Fix 3**: Auto-expired hosts update notices ("Hosts file is up to date" / "Region locks updated!") after 3 seconds, returning status to "API Updated".
+- Fixed unlocalized "Error: " prefix in the footer status bar for Russian locale.
+
 ## [0.5.4] - 2026-09-03
 
 ### Fixed
