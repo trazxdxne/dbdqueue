@@ -14,8 +14,8 @@ if (-not (Test-Path $installDir)) {
 
 $exePath = Join-Path $installDir "dbdq.exe"
 $aliasPath = Join-Path $installDir "dbdqueue.exe"
-$downloadUrl = "https://github.com/$Repo/releases/latest/download/dbdqueue-windows-x64.exe"
-$tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "dbdqueue_download_$([System.Guid]::NewGuid().ToString('N')).exe"
+$downloadUrl = "https://github.com/$Repo/releases/latest/download/dbdq-windows-x64.exe"
+$tempFile = Join-Path ([System.IO.Path]::GetTempPath()) "dbdq_download_$([System.Guid]::NewGuid().ToString('N')).exe"
 
 # 2. Download binary
 Write-Host "==> Downloading latest binary..." -ForegroundColor Cyan

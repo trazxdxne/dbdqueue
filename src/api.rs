@@ -1,6 +1,6 @@
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use serde::Deserialize;
 
 pub static API_TO_AWS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
@@ -28,11 +28,21 @@ pub fn get_api_to_aws() -> &'static HashMap<&'static str, &'static str> {
 
 pub fn get_all_aws_regions() -> Vec<&'static str> {
     vec![
-        "eu-central-1", "eu-west-1", "eu-west-2",
-        "us-east-1", "us-east-2", "us-west-1",
-        "us-west-2", "ca-central-1", "sa-east-1",
-        "ap-south-1", "ap-east-1", "ap-northeast-1",
-        "ap-northeast-2", "ap-southeast-1", "ap-southeast-2"
+        "eu-central-1",
+        "eu-west-1",
+        "eu-west-2",
+        "us-east-1",
+        "us-east-2",
+        "us-west-1",
+        "us-west-2",
+        "ca-central-1",
+        "sa-east-1",
+        "ap-south-1",
+        "ap-east-1",
+        "ap-northeast-1",
+        "ap-northeast-2",
+        "ap-southeast-1",
+        "ap-southeast-2",
     ]
 }
 
@@ -75,7 +85,8 @@ pub fn get_aws_to_flag() -> &'static HashMap<&'static str, &'static str> {
 pub fn get_disabled_aws_regions(queues: &[RegionQueueData]) -> std::collections::HashSet<String> {
     let mut disabled = std::collections::HashSet::new();
     for q in queues {
-        if q.mode == "Standard" && q.is_disabled()
+        if q.mode == "Standard"
+            && q.is_disabled()
             && let Some(code) = API_TO_AWS.get(q.name.as_str())
         {
             disabled.insert(code.to_string());
@@ -104,7 +115,7 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
     if s.is_empty() || s == "—" {
         return 999999;
     }
-    
+
     let mut total = 0u32;
     let mut current_num = 0u32;
     let mut has_num = false;
@@ -129,11 +140,7 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
         total = total.saturating_add(current_num);
     }
 
-    if total > 0 {
-        total
-    } else {
-        999999
-    }
+    if total > 0 { total } else { 999999 }
 }
 
 #[derive(Deserialize, Debug)]
@@ -194,7 +201,10 @@ pub fn get_api_url() -> String {
 pub fn parse_queue_response(body: &str, status: u16) -> Result<Api2Response, String> {
     let trimmed = body.trim();
     if trimmed.is_empty() {
-        return Err(format!("Empty response received from API (HTTP {})", status));
+        return Err(format!(
+            "Empty response received from API (HTTP {})",
+            status
+        ));
     }
 
     if trimmed.starts_with('<') {
@@ -202,14 +212,21 @@ pub fn parse_queue_response(body: &str, status: u16) -> Result<Api2Response, Str
         let clean_snippet = snippet.replace(['\r', '\n'], " ");
         return Err(format!(
             "Received HTML block/page instead of JSON (HTTP {}): {}...",
-            status, clean_snippet.trim()
+            status,
+            clean_snippet.trim()
         ));
     }
 
     serde_json::from_str::<Api2Response>(trimmed).map_err(|e| {
         let snippet: String = trimmed.chars().take(80).collect();
         let clean_snippet = snippet.replace(['\r', '\n'], " ");
-        format!("Error parsing JSON ({}) at line {} col {}: {}...", e, e.line(), e.column(), clean_snippet.trim())
+        format!(
+            "Error parsing JSON ({}) at line {} col {}: {}...",
+            e,
+            e.line(),
+            e.column(),
+            clean_snippet.trim()
+        )
     })
 }
 
@@ -220,43 +237,53 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
         .try_proxy_from_env(true)
         .build();
 
-    let resp = agent.get(&url)
+    let resp = agent
+        .get(&url)
         .set("User-Agent", "curl/8.7.1")
         .set("Accept", "application/json, text/plain, */*")
         .call()
         .map_err(|e| format!("Error connecting to API: {}", e))?;
-        
+
     let status = resp.status();
-    let body = resp.into_string()
+    let body = resp
+        .into_string()
         .map_err(|e| format!("Error reading response (HTTP {}): {}", status, e))?;
-        
+
     let api_data = parse_queue_response(&body, status)?;
-        
+
     let aws_to_api = get_aws_to_api();
     let aws_to_flag = get_aws_to_flag();
     let all_regions = get_all_aws_regions();
-    
+
     let mut data = Vec::new();
-    
+
     for mode_name in &["Standard", "Event"] {
-        let json_mode_key = if *mode_name == "Standard" { "live" } else { "live-event" };
+        let json_mode_key = if *mode_name == "Standard" {
+            "live"
+        } else {
+            "live-event"
+        };
         if let Some(mode_queues) = api_data.queues.get(json_mode_key) {
             for reg in &all_regions {
                 let name = aws_to_api.get(reg).unwrap_or(reg).to_string();
                 let flag = aws_to_flag.get(reg).unwrap_or(&"").to_string();
-                
+
                 let (survivor, killer) = if let Some(q_data) = mode_queues.get(*reg) {
-                    let s_time = q_data.survivor.as_ref()
+                    let s_time = q_data
+                        .survivor
+                        .as_ref()
                         .map(|t| format_seconds_to_time(&t.time))
                         .unwrap_or_else(|| "—".to_string());
-                    let k_time = q_data.killer.as_ref()
+                    let k_time = q_data
+                        .killer
+                        .as_ref()
                         .map(|t| format_seconds_to_time(&t.time))
                         .unwrap_or_else(|| "—".to_string());
                     (s_time, k_time)
                 } else {
                     ("—".to_string(), "—".to_string())
                 };
-                
+
                 data.push(RegionQueueData {
                     flag,
                     name,
@@ -267,7 +294,7 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
             }
         }
     }
-    
+
     Ok((data, api_data.lastupdated2))
 }
 
@@ -317,10 +344,10 @@ mod tests {
                 }
             }
         }"#;
-        
+
         let api_data: Api2Response = serde_json::from_str(sample).unwrap();
         assert_eq!(api_data.lastupdated2, 1781286943);
-        
+
         let live_queues = api_data.queues.get("live").unwrap();
         let frank_live = live_queues.get("eu-central-1").unwrap();
         assert_eq!(frank_live.killer.as_ref().unwrap().time, "207");

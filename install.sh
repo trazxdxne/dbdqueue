@@ -3,7 +3,7 @@ set -e
 
 # Configuration
 REPO="trazxdxne/dbdqueue"
-BINARY_NAME="dbdqueue"
+BINARY_NAME="dbdq"
 
 # Colors for terminal output
 RED='\033[0;31m'
@@ -12,7 +12,7 @@ YELLOW='\033[0;33m'
 BLUE='\033[0;34m'
 NC='\033[0;37m' # No Color
 
-echo "${BLUE}==>${NC} Installing dbdqueue..."
+echo "${BLUE}==>${NC} Installing Dead By Queue..."
 
 # 1. Detect OS
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -37,7 +37,7 @@ case "$ARCH" in
 esac
 
 # 3. Download binary
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/dbdqueue-linux-$SUFFIX"
+DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/dbdq-linux-$SUFFIX"
 TEMP_FILE=$(mktemp)
 
 echo "${BLUE}==>${NC} Downloading binary from $DOWNLOAD_URL..."
@@ -82,9 +82,9 @@ esac
 
 # Launch dbdq if running in an interactive terminal
 if [ -c /dev/tty ]; then
-    echo "${BLUE}==>${NC} Launching dbdqueue..."
+    echo "${BLUE}==>${NC} Launching dbdq..."
     exec "$INSTALL_DIR/dbdq" < /dev/tty
 elif [ -t 0 ]; then
-    echo "${BLUE}==>${NC} Launching dbdqueue..."
+    echo "${BLUE}==>${NC} Launching dbdq..."
     exec "$INSTALL_DIR/dbdq"
 fi

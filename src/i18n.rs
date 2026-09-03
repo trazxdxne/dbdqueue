@@ -118,7 +118,9 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ColSurvivor => "Survivor",
             TextKey::ColKiller => "Killer",
             TextKey::FetchingQueues => "  Fetching queue times...",
-            TextKey::FailedQueues => "  Failed to load queue data. Check network or proxy. Press 'R' to retry.",
+            TextKey::FailedQueues => {
+                "  Failed to load queue data. Check network or proxy. Press 'R' to retry."
+            }
             TextKey::NoDataForMode => "  No queue data available for this mode.",
             TextKey::ActionSelect => "Select ",
             TextKey::ActionLock => "Lock ",
@@ -155,7 +157,9 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ColSurvivor => "Выживший",
             TextKey::ColKiller => "Маньяк",
             TextKey::FetchingQueues => "  Загрузка данных очередей...",
-            TextKey::FailedQueues => "  Не удалось загрузить данные очередей. Проверьте сеть или прокси. Нажмите 'R' для повтора.",
+            TextKey::FailedQueues => {
+                "  Не удалось загрузить данные очередей. Проверьте сеть или прокси. Нажмите 'R' для повтора."
+            }
             TextKey::NoDataForMode => "  Нет данных для выбранного режима.",
             TextKey::ActionSelect => "Выбор ",
             TextKey::ActionLock => "Блокировка ",
@@ -242,32 +246,68 @@ mod tests {
     fn test_locale_precedence() {
         // Explicit En
         assert_eq!(
-            resolve_locale_from_sources(Language::En, Some("ru_RU"), Some("ru"), Some("ru"), Some("ru")),
+            resolve_locale_from_sources(
+                Language::En,
+                Some("ru_RU"),
+                Some("ru"),
+                Some("ru"),
+                Some("ru")
+            ),
             Locale::En
         );
         // Explicit Ru
         assert_eq!(
-            resolve_locale_from_sources(Language::Ru, Some("en_US"), Some("en"), Some("en"), Some("en")),
+            resolve_locale_from_sources(
+                Language::Ru,
+                Some("en_US"),
+                Some("en"),
+                Some("en"),
+                Some("en")
+            ),
             Locale::Ru
         );
 
         // Auto: sys_locale takes precedence
         assert_eq!(
-            resolve_locale_from_sources(Language::Auto, Some("ru-RU"), Some("en_US"), Some("en_US"), Some("en_US")),
+            resolve_locale_from_sources(
+                Language::Auto,
+                Some("ru-RU"),
+                Some("en_US"),
+                Some("en_US"),
+                Some("en_US")
+            ),
             Locale::Ru
         );
         assert_eq!(
-            resolve_locale_from_sources(Language::Auto, Some("en-US"), Some("ru_RU"), Some("ru_RU"), Some("ru_RU")),
+            resolve_locale_from_sources(
+                Language::Auto,
+                Some("en-US"),
+                Some("ru_RU"),
+                Some("ru_RU"),
+                Some("ru_RU")
+            ),
             Locale::En
         );
 
         // Auto: sys_locale empty / None -> falls back to LC_ALL
         assert_eq!(
-            resolve_locale_from_sources(Language::Auto, None, Some("ru_RU.UTF-8"), Some("en"), Some("en")),
+            resolve_locale_from_sources(
+                Language::Auto,
+                None,
+                Some("ru_RU.UTF-8"),
+                Some("en"),
+                Some("en")
+            ),
             Locale::Ru
         );
         assert_eq!(
-            resolve_locale_from_sources(Language::Auto, Some(""), Some("en_US.UTF-8"), Some("ru"), Some("ru")),
+            resolve_locale_from_sources(
+                Language::Auto,
+                Some(""),
+                Some("en_US.UTF-8"),
+                Some("ru"),
+                Some("ru")
+            ),
             Locale::En
         );
 
@@ -277,7 +317,13 @@ mod tests {
             Locale::Ru
         );
         assert_eq!(
-            resolve_locale_from_sources(Language::Auto, None, Some("   "), Some("en_US"), Some("ru")),
+            resolve_locale_from_sources(
+                Language::Auto,
+                None,
+                Some("   "),
+                Some("en_US"),
+                Some("ru")
+            ),
             Locale::En
         );
 

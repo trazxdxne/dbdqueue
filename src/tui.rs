@@ -1,13 +1,13 @@
-use std::path::PathBuf;
-use std::{io, time::Duration};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
+use std::{io, time::Duration};
 
 pub enum AppEvent {
     Input(KeyCode),
@@ -24,7 +24,10 @@ pub enum AppEvent {
     },
 }
 
-pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_app(
+    mut app: crate::app::App,
+    config_path: PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -45,7 +48,8 @@ pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box
 
             if event::poll(timeout).unwrap_or(false)
                 && let Ok(Event::Key(key)) = event::read()
-                && (key.kind == crossterm::event::KeyEventKind::Press || key.kind == crossterm::event::KeyEventKind::Repeat)
+                && (key.kind == crossterm::event::KeyEventKind::Press
+                    || key.kind == crossterm::event::KeyEventKind::Repeat)
             {
                 tx_input.send(AppEvent::Input(key.code)).unwrap_or(());
             }
@@ -77,7 +81,9 @@ pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box
         }
     });
 
-    let dispatch_action = |action: crate::app::AppAction, app: &mut crate::app::App, tx: &mpsc::Sender<AppEvent>| {
+    let dispatch_action = |action: crate::app::AppAction,
+                           app: &mut crate::app::App,
+                           tx: &mpsc::Sender<AppEvent>| {
         match action {
             crate::app::AppAction::None => {}
             crate::app::AppAction::Refresh => {
@@ -85,9 +91,13 @@ pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box
                 thread::spawn(move || {
                     let api_handle = thread::spawn(crate::api::fetch_queue_times);
                     let ping_handle = thread::spawn(crate::ping::measure_all_regions_ping);
-                    let api_res = api_handle.join().unwrap_or_else(|_| Err("API fetch thread error".to_string()));
+                    let api_res = api_handle
+                        .join()
+                        .unwrap_or_else(|_| Err("API fetch thread error".to_string()));
                     let ping_res = ping_handle.join().unwrap_or_default();
-                    tx_refresh.send(AppEvent::ManualRefreshComplete { api_res, ping_res }).unwrap_or(());
+                    tx_refresh
+                        .send(AppEvent::ManualRefreshComplete { api_res, ping_res })
+                        .unwrap_or(());
                 });
             }
             crate::app::AppAction::SaveConfig(cfg) => {
@@ -99,9 +109,18 @@ pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box
             crate::app::AppAction::ApplyLocks(regions) => {
                 let tx_hosts = tx.clone();
                 thread::spawn(move || {
-                    let lock_target = if regions.is_empty() { None } else { Some(regions.as_slice()) };
+                    let lock_target = if regions.is_empty() {
+                        None
+                    } else {
+                        Some(regions.as_slice())
+                    };
                     let res = crate::hosts::update_hosts(lock_target, false);
-                    tx_hosts.send(AppEvent::HostsUpdateComplete { result: res, locked: regions }).unwrap_or(());
+                    tx_hosts
+                        .send(AppEvent::HostsUpdateComplete {
+                            result: res,
+                            locked: regions,
+                        })
+                        .unwrap_or(());
                 });
             }
         }
@@ -131,10 +150,15 @@ pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> Result<(), Box
                         app.on_tick(std::time::Instant::now());
                     }
                     AppEvent::ManualRefreshComplete { api_res, ping_res } => {
-                        app.handle_manual_refresh_complete(api_res, ping_res, std::time::Instant::now());
+                        app.handle_manual_refresh_complete(
+                            api_res,
+                            ping_res,
+                            std::time::Instant::now(),
+                        );
                     }
                     AppEvent::HostsUpdateComplete { result, locked } => {
-                        let action = app.handle_hosts_result(result, locked, std::time::Instant::now());
+                        let action =
+                            app.handle_hosts_result(result, locked, std::time::Instant::now());
                         dispatch_action(action, &mut app, &tx);
                     }
                     AppEvent::ApiUpdate(res) => {

@@ -76,7 +76,11 @@ impl Notice {
         }
     }
 
-    pub fn success(message: impl Into<String>, now: Instant, duration: std::time::Duration) -> Self {
+    pub fn success(
+        message: impl Into<String>,
+        now: Instant,
+        duration: std::time::Duration,
+    ) -> Self {
         Self {
             message: message.into(),
             kind: NoticeKind::Success,
@@ -433,7 +437,11 @@ impl App {
                 } else {
                     i18n::tr(self.locale, i18n::TextKey::FeedbackUpdated)
                 };
-                self.notice = Some(Notice::success(feedback, now, std::time::Duration::from_secs(3)));
+                self.notice = Some(Notice::success(
+                    feedback,
+                    now,
+                    std::time::Duration::from_secs(3),
+                ));
             }
             Err(e) => {
                 self.notice = Some(Notice::error(e));
@@ -645,8 +653,8 @@ mod tests {
             },
         ];
         app.pings.insert("eu-central-1".to_string(), 15); // Frankfurt (disabled)
-        app.pings.insert("us-east-1".to_string(), 80);    // Virginia (active)
-        app.pings.insert("eu-west-1".to_string(), 40);    // Dublin (active)
+        app.pings.insert("us-east-1".to_string(), 80); // Virginia (active)
+        app.pings.insert("eu-west-1".to_string(), 40); // Dublin (active)
 
         let rows = app.get_filtered_sorted_rows();
         assert_eq!(rows[0].name, "Dublin");

@@ -1,8 +1,8 @@
+use ratatui::style::Color;
 use std::collections::HashMap;
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use ratatui::style::Color;
 
 pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
     // 1. Try HTTP Keep-Alive ping to dynamodb.<region>.amazonaws.com/ping (Cloudping.info technique).
@@ -33,7 +33,7 @@ pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
     let host = format!("dynamodb.{}.amazonaws.com:443", region_code);
     let addrs = host.to_socket_addrs().ok()?;
     let addr = addrs.into_iter().next()?;
-    
+
     let tcp_start = Instant::now();
     match TcpStream::connect_timeout(&addr, timeout) {
         Ok(_) => Some(tcp_start.elapsed().as_millis() as u32),
@@ -44,7 +44,7 @@ pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
 pub fn measure_all_regions_ping() -> HashMap<String, u32> {
     let regions = crate::api::get_all_aws_regions();
     let results = Arc::new(Mutex::new(HashMap::new()));
-    
+
     std::thread::scope(|s| {
         for reg in &regions {
             let reg_str = reg.to_string();
@@ -59,7 +59,7 @@ pub fn measure_all_regions_ping() -> HashMap<String, u32> {
             });
         }
     });
-    
+
     results.lock().unwrap().clone()
 }
 

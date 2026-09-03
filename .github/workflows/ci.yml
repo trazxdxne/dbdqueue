@@ -7,8 +7,29 @@ on:
     branches: [ master, main ]
 
 jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check Formatting
+        run: cargo fmt -- --check
+
+      - name: Cargo Clippy
+        run: cargo clippy -- -D warnings
+
   test:
-    name: Test & Lint - ${{ matrix.os }}
+    name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -19,17 +40,9 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
 
-      - name: Cargo Check
-        run: cargo check --verbose
-
-      - name: Cargo Clippy
-        run: cargo clippy -- -D warnings
+      - name: Cache cargo dependencies
+        uses: Swatinem/rust-cache@v2
 
       - name: Run Tests
         run: cargo test --verbose
-
-      - name: Build Release
-        run: cargo build --release

@@ -16,15 +16,15 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            output_name: dbdqueue-linux-x86_64
+            output_name: dbdq-linux-x86_64
             os: ubuntu-latest
             use_cross: false
           - target: aarch64-unknown-linux-gnu
-            output_name: dbdqueue-linux-aarch64
+            output_name: dbdq-linux-aarch64
             os: ubuntu-latest
             use_cross: true
           - target: x86_64-pc-windows-msvc
-            output_name: dbdqueue-windows-x64.exe
+            output_name: dbdq-windows-x64.exe
             os: windows-latest
             use_cross: false
 
@@ -37,34 +37,23 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install Cross
+      - name: Install Cross Toolchain
         if: matrix.use_cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.target }}
 
       - name: Build binary
         shell: bash
-        run: |
-          if [ "${{ matrix.use_cross }}" = "true" ]; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            cargo build --release --target ${{ matrix.target }}
-          fi
+        run: cargo build --release --target ${{ matrix.target }}
 
       - name: Prepare asset
         shell: bash
         run: |
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            if [ -f "target/${{ matrix.target }}/release/dbdq.exe" ]; then
-              cp target/${{ matrix.target }}/release/dbdq.exe ${{ matrix.output_name }}
-            else
-              cp target/${{ matrix.target }}/release/dbdqueue.exe ${{ matrix.output_name }}
-            fi
+            cp target/${{ matrix.target }}/release/dbdq.exe ${{ matrix.output_name }}
           else
-            if [ -f "target/${{ matrix.target }}/release/dbdq" ]; then
-              cp target/${{ matrix.target }}/release/dbdq ${{ matrix.output_name }}
-            else
-              cp target/${{ matrix.target }}/release/dbdqueue ${{ matrix.output_name }}
-            fi
+            cp target/${{ matrix.target }}/release/dbdq ${{ matrix.output_name }}
           fi
 
       - name: Upload artifact
@@ -88,9 +77,9 @@ jobs:
 
       - name: Move artifacts to root
         run: |
-          mv artifacts/dbdqueue-linux-x86_64/dbdqueue-linux-x86_64 .
-          mv artifacts/dbdqueue-linux-aarch64/dbdqueue-linux-aarch64 .
-          mv artifacts/dbdqueue-windows-x64.exe/dbdqueue-windows-x64.exe .
+          mv artifacts/dbdq-linux-x86_64/dbdq-linux-x86_64 .
+          mv artifacts/dbdq-linux-aarch64/dbdq-linux-aarch64 .
+          mv artifacts/dbdq-windows-x64.exe/dbdq-windows-x64.exe .
 
       - name: Extract Release Notes
         id: changelog
@@ -100,12 +89,12 @@ jobs:
           awk -v ver="$VERSION" '/^## \[/ { if ($0 ~ "^## \\[" ver "\\]") flag=1; else flag=0; next } flag' CHANGELOG.md >> release_notes.md
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
-            dbdqueue-linux-x86_64
-            dbdqueue-linux-aarch64
-            dbdqueue-windows-x64.exe
+            dbdq-linux-x86_64
+            dbdq-linux-aarch64
+            dbdq-windows-x64.exe
           body_path: release_notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

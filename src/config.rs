@@ -147,7 +147,10 @@ pub fn get_config_path() -> PathBuf {
         if let Ok(appdata) = std::env::var("APPDATA") {
             PathBuf::from(appdata).join("dbdqueue").join("config.toml")
         } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            PathBuf::from(userprofile).join(".config").join("dbdqueue").join("config.toml")
+            PathBuf::from(userprofile)
+                .join(".config")
+                .join("dbdqueue")
+                .join("config.toml")
         } else {
             PathBuf::from("config.toml")
         }
@@ -175,8 +178,8 @@ pub fn save_config(path: &Path, config: &AppConfig) -> Result<(), std::io::Error
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let toml_str = toml::to_string_pretty(config)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let toml_str =
+        toml::to_string_pretty(config).map_err(|e| std::io::Error::other(e.to_string()))?;
     fs::write(path, toml_str)?;
     Ok(())
 }
@@ -297,5 +300,3 @@ mod tests {
         let _ = fs::remove_file(toml_path);
     }
 }
-
-

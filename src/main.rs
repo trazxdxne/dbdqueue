@@ -7,10 +7,12 @@ mod ping;
 mod tui;
 mod ui;
 
+use crate::app::App;
+use crate::config::{
+    GameMode, SortOrder, get_config_path, load_config, migrate_json_if_needed, save_config,
+};
 use clap::{Parser, Subcommand};
 use std::process;
-use crate::app::App;
-use crate::config::{get_config_path, load_config, migrate_json_if_needed, save_config, GameMode, SortOrder};
 
 #[derive(Parser)]
 #[command(name = "dbdq")]
@@ -49,7 +51,7 @@ pub fn parse_priority_input(words_list: &[String]) -> Vec<String> {
             parts.push(p_clean.to_string());
         }
     }
-    
+
     let mut normalized_map = std::collections::HashMap::new();
     normalized_map.insert("sao paulo", "São Paulo");
     normalized_map.insert("sao_paulo", "São Paulo");
@@ -58,36 +60,36 @@ pub fn parse_priority_input(words_list: &[String]) -> Vec<String> {
     normalized_map.insert("hong_kong", "Hong Kong");
     normalized_map.insert("hongkong", "Hong Kong");
     normalized_map.insert("montreal", "Montréal");
-    
+
     let api_to_aws = crate::api::get_api_to_aws();
     let aws_to_api = crate::api::get_aws_to_api();
-    
+
     let mut resolved = Vec::new();
-    
+
     for part in parts {
         let part_lower = part.to_lowercase();
-        
+
         if let Some(norm) = normalized_map.get(part_lower.as_str()) {
             resolved.push(norm.to_string());
             continue;
         }
-        
+
         if let Some(api_name) = aws_to_api.get(part_lower.as_str()) {
             resolved.push(api_name.to_string());
             continue;
         }
-        
+
         let mut chars = part_lower.chars();
         let part_cap = match chars.next() {
             None => String::new(),
             Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
         };
-        
+
         if api_to_aws.contains_key(part_cap.as_str()) {
             resolved.push(part_cap);
             continue;
         }
-        
+
         let words: Vec<&str> = part.split_whitespace().collect();
         let mut i = 0;
         while i < words.len() {
@@ -100,7 +102,7 @@ pub fn parse_priority_input(words_list: &[String]) -> Vec<String> {
                     continue;
                 }
             }
-            
+
             if let Some(norm) = normalized_map.get(word.as_str()) {
                 resolved.push(norm.to_string());
             } else if let Some(api_name) = aws_to_api.get(word.as_str()) {
@@ -118,19 +120,19 @@ pub fn parse_priority_input(words_list: &[String]) -> Vec<String> {
             i += 1;
         }
     }
-    
+
     resolved
 }
 
 fn main() {
     let args = Cli::parse();
-    
+
     let config_path = get_config_path();
     migrate_json_if_needed(&config_path);
-    
+
     let mut config = load_config(&config_path);
     let mut config_changed = false;
-    
+
     if let Some(ref s) = args.sort {
         let sort_val = match s.to_lowercase().as_str() {
             "killer" => SortOrder::Killer,
@@ -141,7 +143,7 @@ fn main() {
         config.sort = sort_val;
         config_changed = true;
     }
-    
+
     if let Some(ref m) = args.mode {
         let mode_val = match m.to_lowercase().as_str() {
             "event" => GameMode::Event,
@@ -151,7 +153,7 @@ fn main() {
         config.mode = mode_val;
         config_changed = true;
     }
-    
+
     if let Some(ref p) = args.priority {
         let priorities = if p.is_empty() {
             match hosts::interactive_priority_menu(&config.priority) {
@@ -164,12 +166,11 @@ fn main() {
         config.priority = priorities;
         config_changed = true;
     }
-    
-    if config_changed
-        && let Err(e) = save_config(&config_path, &config) {
-            eprintln!("Failed to save config: {}", e);
-        }
-    
+
+    if config_changed && let Err(e) = save_config(&config_path, &config) {
+        eprintln!("Failed to save config: {}", e);
+    }
+
     // Process subcommands
     if let Some(ref cmd) = args.command {
         match cmd {
@@ -192,7 +193,7 @@ fn main() {
                     }
                     resolved
                 };
-                
+
                 config.locked = resolved_regions.clone();
                 if let Err(e) = save_config(&config_path, &config) {
                     eprintln!("Failed to save config: {}", e);
@@ -210,7 +211,7 @@ fn main() {
             }
         }
     }
-    
+
     let mut app = App::new(
         config.sort,
         config.mode,
@@ -219,7 +220,7 @@ fn main() {
         config.lang,
         config.api_url,
     );
-    
+
     // Initial fetch to show data immediately
     if let Ok((queues, updated)) = api::fetch_queue_times() {
         app.queues = queues;
@@ -227,7 +228,7 @@ fn main() {
         app.is_fetching = false;
         app.clamp_selection();
     }
-    
+
     if let Err(e) = tui::run_app(app, config_path) {
         eprintln!("Error running TUI: {}", e);
         process::exit(1);
@@ -243,11 +244,11 @@ mod tests {
         let input1 = vec!["Frankfurt,Dublin".to_string()];
         let parsed1 = parse_priority_input(&input1);
         assert_eq!(parsed1, vec!["Frankfurt", "Dublin"]);
-        
+
         let input2 = vec!["sao paulo, montreal, virginia".to_string()];
         let parsed2 = parse_priority_input(&input2);
         assert_eq!(parsed2, vec!["São Paulo", "Montréal", "Virginia"]);
-        
+
         let input3 = vec!["us-east-1".to_string(), "eu-central-1".to_string()];
         let parsed3 = parse_priority_input(&input3);
         assert_eq!(parsed3, vec!["Virginia", "Frankfurt"]);

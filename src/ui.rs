@@ -1,12 +1,12 @@
 use crate::api;
 use crate::app::{App, NoticeKind, SPINNER_FRAMES};
-use crate::i18n::{format_time_diff, tr, tr_mode, tr_sort, TextKey};
+use crate::i18n::{TextKey, format_time_diff, tr, tr_mode, tr_sort};
 use ratatui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table},
-    Frame,
 };
 
 pub const HEADER_HEIGHT: u16 = 3;
@@ -61,17 +61,38 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let header_line = Line::from(vec![
-        Span::styled(tr(app.locale, TextKey::SortLabel), Style::default().fg(Color::DarkGray)),
-        Span::styled(active_sort_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            tr(app.locale, TextKey::SortLabel),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            active_sort_str,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(tr(app.locale, TextKey::ModeLabel), Style::default().fg(Color::DarkGray)),
-        Span::styled(mode_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            tr(app.locale, TextKey::ModeLabel),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            mode_str,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(tr(app.locale, TextKey::LockLabel), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            tr(app.locale, TextKey::LockLabel),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::styled(
             lock_str,
             if !app.locked.is_empty() {
-                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
             },
@@ -84,7 +105,9 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
             .border_style(Style::default().fg(Color::LightRed))
             .title(Span::styled(
                 tr(app.locale, TextKey::HeaderTitle),
-                Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD),
             )),
     );
     f.render_widget(header, area);
@@ -98,7 +121,11 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     let (rows, col_constraints) = if is_empty {
         let (msg, color) = if app.is_fetching {
             (tr(app.locale, TextKey::FetchingQueues), Color::LightRed)
-        } else if app.notice.as_ref().is_some_and(|n| n.kind == NoticeKind::Error) {
+        } else if app
+            .notice
+            .as_ref()
+            .is_some_and(|n| n.kind == NoticeKind::Error)
+        {
             (tr(app.locale, TextKey::FailedQueues), Color::Red)
         } else {
             (tr(app.locale, TextKey::NoDataForMode), Color::DarkGray)
@@ -141,7 +168,9 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
                     ])
                 } else {
                     let name_style = if is_whitelisted {
-                        Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
+                        Style::default()
+                            .fg(Color::LightRed)
+                            .add_modifier(Modifier::BOLD)
                     } else {
                         Style::default()
                     };
@@ -160,8 +189,14 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
                     Row::new(vec![
                         Cell::from(Span::styled(reg_str, name_style)),
                         Cell::from(Span::styled(ping_str, Style::default().fg(ping_color))),
-                        Cell::from(Span::styled(item.survivor.clone(), Style::default().fg(surv_color))),
-                        Cell::from(Span::styled(item.killer.clone(), Style::default().fg(kill_color))),
+                        Cell::from(Span::styled(
+                            item.survivor.clone(),
+                            Style::default().fg(surv_color),
+                        )),
+                        Cell::from(Span::styled(
+                            item.killer.clone(),
+                            Style::default().fg(kill_color),
+                        )),
                     ])
                 }
             })
@@ -185,10 +220,18 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     let mut table = Table::new(rows, col_constraints)
         .header(
             Row::new(vec![hdr_region, hdr_ping, hdr_survivor, hdr_killer])
-                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+                .style(
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .bottom_margin(1),
         )
-        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray)),
+        )
         .column_spacing(1);
 
     if !is_empty {
@@ -213,14 +256,25 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
             NoticeKind::Info => Color::LightRed,
             NoticeKind::Success => Color::Green,
         };
-        Span::styled(notice.message.clone(), Style::default().fg(color).add_modifier(Modifier::BOLD))
+        Span::styled(
+            notice.message.clone(),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )
     } else if app.is_fetching {
         let spinner = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
         let msg = tr(app.locale, TextKey::StatusFetching);
-        Span::styled(format!("{} {}", spinner, msg), Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD))
+        Span::styled(
+            format!("{} {}", spinner, msg),
+            Style::default()
+                .fg(Color::LightRed)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
         let prefix = tr(app.locale, TextKey::StatusApiUpdated);
-        Span::styled(format!("{}{}", prefix, time_str), Style::default().fg(Color::DarkGray))
+        Span::styled(
+            format!("{}{}", prefix, time_str),
+            Style::default().fg(Color::DarkGray),
+        )
     };
 
     let select_txt = tr(app.locale, TextKey::ActionSelect);
@@ -263,7 +317,9 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(Color::LightRed))
         .title(Span::styled(
             modal_title,
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         ));
 
     let inner_area = block.inner(area);
@@ -271,10 +327,7 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
 
     let modal_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(0),
-            Constraint::Length(1),
-        ])
+        .constraints([Constraint::Min(0), Constraint::Length(1)])
         .split(inner_area);
 
     let modal_regions = app.get_modal_regions();
@@ -377,8 +430,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 mod tests {
     use super::*;
     use crate::config::{GameMode, Language, SortOrder};
-    use ratatui::backend::TestBackend;
     use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
 
     #[test]
     fn test_modal_label_color_via_test_backend() {
@@ -436,7 +489,10 @@ mod tests {
             }
         }
 
-        assert!(found_line, "Modal action instruction line not found in buffer");
+        assert!(
+            found_line,
+            "Modal action instruction line not found in buffer"
+        );
     }
 
     #[test]

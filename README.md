@@ -51,7 +51,7 @@ sudo cp target/release/dbdq /usr/local/bin/
 ```
 
 ### Windows
-1. Download the latest compiled Windows binary `dbdqueue-windows-x64.exe` from our [GitHub Releases](https://github.com/trazxdxne/dbdqueue/releases) page.
+1. Download the latest compiled Windows binary `dbdq-windows-x64.exe` from our [GitHub Releases](https://github.com/trazxdxne/dbdqueue/releases) page.
 2. Rename it to `dbdq.exe` and place it in a directory in your user `PATH`.
 
 Alternatively, compile from source (requires Rust toolchain):
