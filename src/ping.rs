@@ -5,37 +5,39 @@ use std::time::{Duration, Instant};
 use ratatui::style::Color;
 
 pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
-    // 1. Try end-to-end TLS / HTTPS HEAD request to force the connection through any TUN / transparent proxy.
-    // When a proxy or TUN adapter (WinTun / Sing-box / Hiddify / Clash) is active, raw TCP SYN packets
-    // are answered locally in < 1ms (0ms ping). A TLS handshake cannot be faked locally and requires
-    // full round-trip communication with the AWS datacenter.
-    let url = format!("https://dynamodb.{}.amazonaws.com", region_code);
+    // 1. Try HTTP Keep-Alive ping to dynamodb.<region>.amazonaws.com/ping (Cloudping.info technique).
+    // The first request performs DNS + TCP + TLS handshake (warming up the connection into the pool).
+    // The second request is sent over the already-open HTTP Keep-Alive TLS connection,
+    // measuring strictly 1 network round-trip time (RTT), matching ICMP ping accuracy while
+    // preventing local TUN/proxy adapters from faking 0 ms TCP handshakes.
+    let url = format!("https://dynamodb.{}.amazonaws.com/ping", region_code);
     let agent = ureq::builder()
         .timeout(timeout)
         .try_proxy_from_env(true)
         .build();
 
-    let start = Instant::now();
-    let res = agent.head(&url).call();
-    let elapsed = start.elapsed().as_millis() as u32;
+    // Warm-up request: establish connection and drain small body to return socket to pool
+    if let Ok(resp) = agent.get(&url).call() {
+        let _ = resp.into_string();
 
-    match res {
-        Ok(_) | Err(ureq::Error::Status(_, _)) => {
-            // Even HTTP 400/403/404 confirms end-to-end TLS handshake and RTT to AWS
-            Some(elapsed)
+        // Timed Keep-Alive request: measures pure 1 RTT over active TLS stream
+        let start = Instant::now();
+        if let Ok(ping_resp) = agent.get(&url).call() {
+            let _ = ping_resp.into_string();
+            let elapsed = start.elapsed().as_millis() as u32;
+            return Some(elapsed);
         }
-        Err(_) => {
-            // Fallback to raw TCP connection if HTTPS request fails
-            let host = format!("dynamodb.{}.amazonaws.com:443", region_code);
-            let addrs = host.to_socket_addrs().ok()?;
-            let addr = addrs.into_iter().next()?;
-            
-            let tcp_start = Instant::now();
-            match TcpStream::connect_timeout(&addr, timeout) {
-                Ok(_) => Some(tcp_start.elapsed().as_millis() as u32),
-                Err(_) => None,
-            }
-        }
+    }
+
+    // 2. Fallback to raw TCP connection if HTTPS request fails
+    let host = format!("dynamodb.{}.amazonaws.com:443", region_code);
+    let addrs = host.to_socket_addrs().ok()?;
+    let addr = addrs.into_iter().next()?;
+    
+    let tcp_start = Instant::now();
+    match TcpStream::connect_timeout(&addr, timeout) {
+        Ok(_) => Some(tcp_start.elapsed().as_millis() as u32),
+        Err(_) => None,
     }
 }
 
@@ -85,5 +87,13 @@ mod tests {
         assert_eq!(color_for_ping(Some(250)), Color::Red);
         assert_eq!(color_for_ping(Some(300)), Color::Red);
         assert_eq!(color_for_ping(None), Color::DarkGray);
+    }
+
+    #[test]
+    fn test_all_regions_ping() {
+        let pings = measure_all_regions_ping();
+        for (reg, ms) in &pings {
+            println!("{}: {} ms", reg, ms);
+        }
     }
 }
