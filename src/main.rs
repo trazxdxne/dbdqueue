@@ -12,7 +12,7 @@ use crate::config::{get_config_path, load_config, save_config, migrate_json_if_n
 
 #[derive(Parser)]
 #[command(name = "dbdq")]
-#[command(about = "Dead by Daylight Queue Times & Region Locker CLI", long_about = None)]
+#[command(about = "Dead by Daylight Matchmaking Queue Times & Region Locker TUI", long_about = None)]
 struct Cli {
     #[arg(short, long, value_parser = ["survivor", "killer", "ping", "priority", "default"], help = "Sort output by column/rules (persists in config)")]
     sort: Option<String>,

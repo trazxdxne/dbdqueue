@@ -1,18 +1,20 @@
-# Dead by Daylight Queue Times CLI (`dbdqueue`)
+# Dead By Queue (`dbdq`)
 
-A fast, zero-dependency, compiled native CLI tool for Dead by Daylight players to view real-time matchmaking queue times directly from their terminal via a beautiful full-screen interactive TUI dashboard. Compatible with both **Linux** and **Windows**.
+> *Disclaimer: Dead By Queue is an independent, community-built TUI utilizing the public deadbyqueue.com API. It is not affiliated with, endorsed by, or partnered with deadbyqueue.com or Behaviour Interactive.*
+
+A fast, zero-dependency, compiled native TUI for Dead by Daylight players. Beyond monitoring live matchmaking queue times and server pings directly from your terminal, Dead By Queue empowers players with full control over matchmaking through integrated AWS region locking. Compatible with both **Linux** and **Windows**.
 
 ---
 
 ## Features
 
 - **Live Interactive Dashboard**: Built with `ratatui`, providing a clean, auto-refreshing full-screen experience.
-- **Real-Time Auto-Refresh**: Background worker fetches live data every 60 seconds without needing to restart the app.
+- **Matchmaking Region Control**: Block or whitelist specific AWS server regions directly from the TUI (`l`) or CLI (`dbdq lock` / `dbdq unlock`).
+- **Real-Time Auto-Refresh & Manual Trigger**: Background worker auto-fetches live data every 60 seconds, with immediate non-blocking refresh via `r`.
 - **Accurate Refresh Timestamps**: Shows the exact, true time when the queue data was last updated at the source.
 - **Dynamic Sorting & Filtering**:
-  - Sort by survivor times (`s`), killer times (`k`), ping (`p`), or default region name (`d`).
+  - Cycle sort modes with `s` (Killer → Survivor → Ping).
   - Filter by game modes (`m` to toggle Standard/Event).
-- **Region Locker**: Block or whitelist specific AWS server regions directly from the TUI (`l`) or CLI (`dbdq lock` / `dbdq unlock`).
 - **Multi-Layout Keyboard Support**: Works on any keyboard layout (e.g. Russian Cyrillic).
 - **Local Settings**: Persistent config saving your preferences (mode, sorting, locked regions):
   - Linux: `~/.config/dbdqueue/config.toml`
@@ -72,11 +74,9 @@ dbdq
 ### Keyboard Controls
 - `↑` / `↓` : Scroll table
 - `l` : Open Region Locker modal
-- `s` : Sort by Survivor queue times
-- `k` : Sort by Killer queue times
-- `p` : Sort by Ping
-- `d` : Sort by Default (region name)
+- `s` : Cycle sort (Killer → Survivor → Ping)
 - `m` : Toggle Matchmaking Mode (Standard / Event)
+- `r` : Refresh queue data and ping in background
 - `Esc` : Quit (or close modal)
 
 ### CLI Configuration Flags

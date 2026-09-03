@@ -13,6 +13,10 @@ pub enum AppEvent {
     Tick,
     ApiUpdate(Result<(Vec<crate::api::RegionQueueData>, i64), String>),
     PingUpdate(std::collections::HashMap<String, u32>),
+    ManualRefreshComplete {
+        api_res: Result<(Vec<crate::api::RegionQueueData>, i64), String>,
+        ping_res: std::collections::HashMap<String, u32>,
+    },
 }
 
 pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error>> {
@@ -79,10 +83,11 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
                             if app.handle_key(c) == crate::app::AppAction::Refresh {
                                 let tx_refresh = tx.clone();
                                 thread::spawn(move || {
-                                    let res = crate::api::fetch_queue_times();
-                                    tx_refresh.send(AppEvent::ApiUpdate(res)).unwrap_or(());
-                                    let pings = crate::ping::measure_all_regions_ping();
-                                    tx_refresh.send(AppEvent::PingUpdate(pings)).unwrap_or(());
+                                    let api_handle = thread::spawn(|| crate::api::fetch_queue_times());
+                                    let ping_handle = thread::spawn(|| crate::ping::measure_all_regions_ping());
+                                    let api_res = api_handle.join().unwrap_or_else(|_| Err("API fetch thread error".to_string()));
+                                    let ping_res = ping_handle.join().unwrap_or_default();
+                                    tx_refresh.send(AppEvent::ManualRefreshComplete { api_res, ping_res }).unwrap_or(());
                                 });
                             }
                         }
@@ -92,9 +97,35 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
                         KeyCode::Esc => app.handle_esc(),
                         _ => {}
                     },
-                    AppEvent::Tick => {}
-                    AppEvent::ApiUpdate(res) => {
+                    AppEvent::Tick => {
+                        app.on_tick();
+                    }
+                    AppEvent::ManualRefreshComplete { api_res, ping_res } => {
                         app.is_fetching = false;
+                        app.status_msg = None;
+                        app.pings = ping_res;
+                        match api_res {
+                            Ok((queues, last_updated)) => {
+                                let is_same = app.api_last_updated == last_updated && !app.queues.is_empty();
+                                app.queues = queues;
+                                app.api_last_updated = last_updated;
+                                app.error_msg = None;
+                                let is_ru = std::env::var("LANG").unwrap_or_default().to_lowercase().starts_with("ru")
+                                    || std::env::var("LC_ALL").unwrap_or_default().to_lowercase().starts_with("ru")
+                                    || std::env::var("LC_MESSAGES").unwrap_or_default().to_lowercase().starts_with("ru");
+                                let feedback = if is_same {
+                                    if is_ru { "[✓ Актуально]" } else { "[✓ Up to date]" }
+                                } else {
+                                    if is_ru { "[✓ Обновлено]" } else { "[✓ Updated]" }
+                                };
+                                app.refresh_feedback = Some((feedback.to_string(), std::time::Instant::now()));
+                            }
+                            Err(e) => {
+                                app.error_msg = Some(e);
+                            }
+                        }
+                    }
+                    AppEvent::ApiUpdate(res) => {
                         match res {
                             Ok((queues, last_updated)) => {
                                 app.queues = queues;
@@ -102,7 +133,9 @@ pub fn run_app(mut app: crate::app::App) -> Result<(), Box<dyn std::error::Error
                                 app.error_msg = None;
                             }
                             Err(e) => {
-                                app.error_msg = Some(e);
+                                if app.queues.is_empty() {
+                                    app.error_msg = Some(e);
+                                }
                             }
                         }
                     }

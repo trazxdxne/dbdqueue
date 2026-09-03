@@ -56,6 +56,8 @@ pub enum AppAction {
     Refresh,
 }
 
+pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+
 pub struct App {
     pub queues: Vec<RegionQueueData>,
     pub api_last_updated: i64,
@@ -72,6 +74,8 @@ pub struct App {
     pub show_lock_modal: bool,
     pub lock_modal_selected: Vec<String>,
     pub lock_modal_cursor: usize,
+    pub spinner_frame: usize,
+    pub refresh_feedback: Option<(String, std::time::Instant)>,
 }
 
 impl App {
@@ -92,6 +96,8 @@ impl App {
             show_lock_modal: false,
             lock_modal_selected: Vec::new(),
             lock_modal_cursor: 0,
+            spinner_frame: 0,
+            refresh_feedback: None,
         }
     }
 
@@ -227,9 +233,29 @@ impl App {
         let _ = save_config(&config_path, &config);
     }
 
+    #[allow(dead_code)]
     pub fn set_sort(&mut self, sort: &str) {
         self.sort = sort.to_string();
         self.save_current_config();
+    }
+
+    pub fn cycle_sort(&mut self) {
+        self.sort = match self.sort.as_str() {
+            "killer" => "survivor".to_string(),
+            "survivor" => "ping".to_string(),
+            "ping" => "killer".to_string(),
+            _ => "killer".to_string(),
+        };
+        self.save_current_config();
+    }
+
+    pub fn on_tick(&mut self) {
+        self.spinner_frame = (self.spinner_frame + 1) % SPINNER_FRAMES.len();
+        if let Some((_, instant)) = &self.refresh_feedback {
+            if instant.elapsed() >= std::time::Duration::from_millis(2500) {
+                self.refresh_feedback = None;
+            }
+        }
     }
 
     pub fn handle_key(&mut self, c: char) -> AppAction {
@@ -242,10 +268,7 @@ impl App {
             AppAction::None
         } else {
             match norm {
-                's' => { self.set_sort("survivor"); AppAction::None }
-                'k' => { self.set_sort("killer"); AppAction::None }
-                'p' => { self.set_sort("ping"); AppAction::None }
-                'd' => { self.set_sort("default"); AppAction::None }
+                's' => { self.cycle_sort(); AppAction::None }
                 'l' => { self.open_lock_modal(); AppAction::None }
                 'm' => {
                     if self.mode == "standard" {
@@ -257,10 +280,15 @@ impl App {
                     AppAction::None
                 }
                 'r' => {
-                    self.is_fetching = true;
-                    self.error_msg = None;
-                    self.status_msg = Some(if is_russian() { "Обновление данных...".to_string() } else { "Refreshing data...".to_string() });
-                    AppAction::Refresh
+                    if !self.is_fetching {
+                        self.is_fetching = true;
+                        self.error_msg = None;
+                        self.status_msg = None;
+                        self.refresh_feedback = None;
+                        AppAction::Refresh
+                    } else {
+                        AppAction::None
+                    }
                 }
                 _ => AppAction::None,
             }
@@ -366,33 +394,88 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .split(f.area());
 
     let is_ru = is_russian();
-    let title_text = if is_ru { " Время ожидания Dead by Daylight " } else { " Dead by Daylight Queue Times " };
-    // Title
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(title_text, Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
-    ]))
-    .block(Block::default().borders(Borders::ALL));
-    f.render_widget(title, chunks[0]);
+    let title_text = " Dead By Queue ";
+
+    let active_sort_str = match app.sort.as_str() {
+        "killer" => if is_ru { "Маньяк" } else { "Killer" },
+        "survivor" => if is_ru { "Выживший" } else { "Survivor" },
+        "ping" => if is_ru { "Пинг" } else { "Ping" },
+        _ => if is_ru { "Маньяк" } else { "Killer" },
+    };
+
+    let mode_str = if is_ru {
+        match app.mode.as_str() {
+            "event" => "Ивент",
+            _ => "Обычный",
+        }
+    } else {
+        match app.mode.as_str() {
+            "event" => "Event",
+            _ => "Standard",
+        }
+    };
+
+    let lock_str = if app.locked.is_empty() {
+        if is_ru { "Все" } else { "None" }
+    } else {
+        if is_ru { "Активен" } else { "Active" }
+    };
+
+    // Header block
+    let header_line = Line::from(vec![
+        Span::styled(if is_ru { "Сортировка: " } else { "Sort: " }, Style::default().fg(Color::DarkGray)),
+        Span::styled(active_sort_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(if is_ru { "Режим: " } else { "Mode: " }, Style::default().fg(Color::DarkGray)),
+        Span::styled(mode_str, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(if is_ru { "Блокировка: " } else { "Lock: " }, Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            lock_str,
+            if !app.locked.is_empty() {
+                Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::DarkGray)
+            },
+        ),
+    ]);
+
+    let header = Paragraph::new(header_line)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::LightRed))
+                .title(Span::styled(title_text, Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD))),
+        );
+    f.render_widget(header, chunks[0]);
 
     // Table
     let api_to_aws = crate::api::get_api_to_aws();
-    let rows: Vec<Row> = if is_empty {
+    let (rows, col_constraints) = if is_empty {
+        app.table_state.select(None);
         let (msg, color) = if app.is_fetching {
-            (if is_ru { "  Загрузка данных очередей..." } else { "  Fetching queue times..." }, Color::Yellow)
+            (if is_ru { "  Загрузка данных очередей..." } else { "  Fetching queue times..." }, Color::LightRed)
         } else if app.error_msg.is_some() {
             (if is_ru { "  Не удалось загрузить данные очередей. Проверьте сеть или прокси. Нажмите 'R' для повтора." } else { "  Failed to load queue data. Check network or proxy. Press 'R' to retry." }, Color::Red)
         } else {
             (if is_ru { "  Нет данных для выбранного режима." } else { "  No queue data available for this mode." }, Color::DarkGray)
         };
-        vec![Row::new(vec![
-            Cell::from(Span::styled(msg, Style::default().fg(color))),
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from(""),
-            Cell::from(""),
-        ])]
+        (
+            vec![Row::new(vec![
+                Cell::from(Span::styled(msg, Style::default().fg(color))),
+                Cell::from(""),
+                Cell::from(""),
+                Cell::from(""),
+            ])],
+            [
+                Constraint::Percentage(100),
+                Constraint::Length(0),
+                Constraint::Length(0),
+                Constraint::Length(0),
+            ],
+        )
     } else {
-        rows_data.into_iter().map(|item| {
+        let r: Vec<Row> = rows_data.into_iter().map(|item| {
             let aws_code = api_to_aws.get(item.name.as_str()).unwrap_or(&"");
             let is_whitelisted = app.locked.iter().any(|l| l == aws_code);
             let is_disabled = item.survivor == "—" && item.killer == "—";
@@ -405,18 +488,16 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
             if is_disabled {
                 let dim_style = Style::default().fg(Color::DarkGray);
-                let lock_text = if is_whitelisted { "[LOCKED]" } else { "—" };
 
                 Row::new(vec![
                     Cell::from(Span::styled(reg_str, dim_style)),
                     Cell::from(Span::styled("—", dim_style)),
                     Cell::from(Span::styled("—", dim_style)),
                     Cell::from(Span::styled("—", dim_style)),
-                    Cell::from(Span::styled(lock_text, dim_style)),
                 ])
             } else {
                 let name_style = if is_whitelisted {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD)
                 } else {
                     Style::default()
                 };
@@ -429,12 +510,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     ("—".to_string(), Color::DarkGray)
                 };
 
-                let (lock_text, lock_style) = if is_whitelisted {
-                    ("[LOCKED]".to_string(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
-                } else {
-                    ("—".to_string(), Style::default().fg(Color::DarkGray))
-                };
-
                 let surv_color = color_for_time(&item.survivor);
                 let kill_color = color_for_time(&item.killer);
 
@@ -443,62 +518,37 @@ pub fn draw(f: &mut Frame, app: &mut App) {
                     Cell::from(Span::styled(ping_str, Style::default().fg(ping_color))),
                     Cell::from(Span::styled(item.survivor.clone(), Style::default().fg(surv_color))),
                     Cell::from(Span::styled(item.killer.clone(), Style::default().fg(kill_color))),
-                    Cell::from(Span::styled(lock_text, lock_style)),
                 ])
             }
-        }).collect()
-    };
-
-    let active_sort_str = match app.sort.as_str() {
-        "survivor" => if is_ru { "Выживший" } else { "Survivor" },
-        "killer" => if is_ru { "Маньяк" } else { "Killer" },
-        "ping" => if is_ru { "Пинг" } else { "Ping" },
-        _ => if is_ru { "По умолч." } else { "Default" },
-    };
-
-    let mode_str = if is_ru {
-        match app.mode.as_str() {
-            "standard" => "Обычный",
-            "event" => "Ивент",
-            other => other,
-        }
-    } else {
-        app.mode.as_str()
-    };
-
-    let lock_str = if app.locked.is_empty() {
-        if is_ru { "Все" } else { "All" }
-    } else {
-        if is_ru { "Активен" } else { "Active" }
-    };
-
-    let table_title = if is_ru {
-        format!(" Сортировка: {} | Режим: {} | Блокировка: {} ", active_sort_str, mode_str, lock_str)
-    } else {
-        format!(" Sort: {} | Mode: {} | Lock: {} ", active_sort_str, mode_str, lock_str)
+        }).collect();
+        (
+            r,
+            [
+                Constraint::Min(24),
+                Constraint::Length(12),
+                Constraint::Length(14),
+                Constraint::Length(14),
+            ],
+        )
     };
 
     let hdr_region = if is_ru { "Регион" } else { "Region" };
     let hdr_ping = if is_ru { "Пинг" } else { "Ping" };
     let hdr_survivor = if is_ru { "Выживший" } else { "Survivor" };
     let hdr_killer = if is_ru { "Маньяк" } else { "Killer" };
-    let hdr_lock = if is_ru { "Блокировка" } else { "Lock" };
 
-    let table = Table::new(rows, [
-        Constraint::Length(22),
-        Constraint::Length(10),
-        Constraint::Length(12),
-        Constraint::Length(12),
-        Constraint::Length(12),
-    ])
-    .header(
-        Row::new(vec![hdr_region, hdr_ping, hdr_survivor, hdr_killer, hdr_lock])
-            .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-            .bottom_margin(1),
-    )
-    .block(Block::default().borders(Borders::ALL).title(table_title))
-    .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-    .column_spacing(1);
+    let mut table = Table::new(rows, col_constraints)
+        .header(
+            Row::new(vec![hdr_region, hdr_ping, hdr_survivor, hdr_killer])
+                .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD))
+                .bottom_margin(1),
+        )
+        .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)))
+        .column_spacing(1);
+
+    if !is_empty {
+        table = table.row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    }
 
     f.render_stateful_widget(table, chunks[1], &mut app.table_state);
 
@@ -506,23 +556,32 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let now = chrono::Utc::now().timestamp();
     let diff = now - app.api_last_updated;
     let time_str = if app.api_last_updated == 0 {
-        if is_ru { "Загрузка...".to_string() } else { "Fetching...".to_string() }
+        if is_ru { "Загрузка...".to_string() } else { "fetching...".to_string() }
     } else if diff < 60 {
         if is_ru { "только что".to_string() } else { "just now".to_string() }
     } else if diff < 3600 {
-        if is_ru { format!("{} мин. назад", diff / 60) } else { format!("{} mins ago", diff / 60) }
+        if is_ru { format!("{} мин. назад", diff / 60) } else { format!("{}m ago", diff / 60) }
     } else {
-        if is_ru { format!("{} ч. {} мин. назад", diff / 3600, (diff % 3600) / 60) } else { format!("{} hrs {} mins ago", diff / 3600, (diff % 3600) / 60) }
+        if is_ru { format!("{} ч. {} мин. назад", diff / 3600, (diff % 3600) / 60) } else { format!("{}h {}m ago", diff / 3600, (diff % 3600) / 60) }
     };
 
-    let status_text = if let Some(ref status) = app.status_msg {
-        status.clone()
-    } else if let Some(ref err) = app.error_msg {
-        if is_ru { format!("Ошибка: {}", err) } else { format!("Error: {}", err) }
+    let status_span = if let Some(ref err) = app.error_msg {
+        Span::styled(format!("Error: {}", err), Style::default().fg(Color::Red))
+    } else if let Some(ref status) = app.status_msg {
+        Span::styled(status.clone(), Style::default().fg(Color::LightRed))
     } else if app.is_fetching {
-        if is_ru { "Обновление данных...".to_string() } else { "Updating data...".to_string() }
+        let spinner = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
+        let msg = if is_ru { "Обновление..." } else { "Fetching..." };
+        Span::styled(format!("{} {}", spinner, msg), Style::default().fg(Color::LightRed).add_modifier(Modifier::BOLD))
+    } else if let Some((ref feedback, _)) = app.refresh_feedback {
+        Span::styled(feedback.clone(), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD))
     } else {
-        if is_ru { format!("Обновлено: {}", time_str) } else { format!("Updated: {}", time_str) }
+        let api_updated = if is_ru {
+            format!("API обновлено: {}", time_str)
+        } else {
+            format!("API Updated: {}", time_str)
+        };
+        Span::styled(api_updated, Style::default().fg(Color::DarkGray))
     };
 
     let scroll_txt = if is_ru { "Прокрутка " } else { "Scroll " };
@@ -533,20 +592,20 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let quit_txt = if is_ru { "Выход " } else { "Quit " };
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled(" [\u{2191}\u{2193}] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [\u{2191}\u{2193}] ", Style::default().fg(Color::LightRed)),
         Span::raw(scroll_txt),
-        Span::styled(" [L] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [L] ", Style::default().fg(Color::LightRed)),
         Span::raw(lock_txt),
-        Span::styled(" [S/K/P/D] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [S] ", Style::default().fg(Color::LightRed)),
         Span::raw(sort_txt),
-        Span::styled(" [M] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [M] ", Style::default().fg(Color::LightRed)),
         Span::raw(mode_txt),
-        Span::styled(" [R] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [R] ", Style::default().fg(Color::LightRed)),
         Span::raw(refresh_txt),
-        Span::styled(" [Esc] ", Style::default().fg(Color::Yellow)),
+        Span::styled(" [Esc] ", Style::default().fg(Color::LightRed)),
         Span::raw(quit_txt),
-        Span::raw(" | "),
-        Span::styled(status_text, Style::default().fg(Color::DarkGray)),
+        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
+        status_span,
     ]));
     f.render_widget(footer, chunks[3]);
 
@@ -560,11 +619,22 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             " Region Locker (select whitelisted) "
         };
         
-        let modal_instructions = if is_ru {
-            " [↑↓] Выбор  [Пробел] Вкл/Выкл  [Enter] Применить  [Esc] Отмена "
+        let (select_txt, toggle_txt, apply_txt, cancel_txt) = if is_ru {
+            ("Выбор", "Вкл/Выкл", "Применить", "Отмена")
         } else {
-            " [↑↓] Select  [Space] Toggle  [Enter] Apply  [Esc] Cancel "
+            ("Select", "Toggle", "Apply", "Cancel")
         };
+
+        let modal_instructions = Line::from(vec![
+            Span::styled(" [↑↓] ", Style::default().fg(Color::LightRed)),
+            Span::styled(select_txt, Style::default().fg(Color::DarkGray)),
+            Span::styled("  [Space] ", Style::default().fg(Color::LightRed)),
+            Span::styled(toggle_txt, Style::default().fg(Color::DarkGray)),
+            Span::styled("  [Enter] ", Style::default().fg(Color::LightRed)),
+            Span::styled(apply_txt, Style::default().fg(Color::DarkGray)),
+            Span::styled("  [Esc] ", Style::default().fg(Color::LightRed)),
+            Span::styled(cancel_txt, Style::default().fg(Color::DarkGray)),
+        ]);
         
         let modal_regions = app.get_modal_regions();
         let aws_to_api = crate::api::get_aws_to_api();
@@ -602,9 +672,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Cyan))
-                    .title(Span::styled(modal_title, Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)))
-                    .title_bottom(Span::styled(modal_instructions, Style::default().fg(Color::Cyan)))
+                    .border_style(Style::default().fg(Color::LightRed))
+                    .title(Span::styled(modal_title, Style::default().fg(Color::White).add_modifier(Modifier::BOLD)))
+                    .title_bottom(modal_instructions)
             );
         f.render_widget(list, area);
     }
@@ -752,6 +822,42 @@ mod tests {
         assert_eq!(rows[0].name, "Dublin");
         assert_eq!(rows[1].name, "Virginia");
         assert_eq!(rows[2].name, "Frankfurt");
+    }
+
+    #[test]
+    fn test_cycle_sort() {
+        let mut app = App::new("killer".to_string(), "standard".to_string(), vec![], vec![]);
+        app.cycle_sort();
+        assert_eq!(app.sort, "survivor");
+        app.cycle_sort();
+        assert_eq!(app.sort, "ping");
+        app.cycle_sort();
+        assert_eq!(app.sort, "killer");
+
+        // Fallback from default
+        app.sort = "default".to_string();
+        app.cycle_sort();
+        assert_eq!(app.sort, "killer");
+    }
+
+    #[test]
+    fn test_on_tick_spinner_and_feedback() {
+        let mut app = App::new("killer".to_string(), "standard".to_string(), vec![], vec![]);
+        assert_eq!(app.spinner_frame, 0);
+        app.on_tick();
+        assert_eq!(app.spinner_frame, 1);
+
+        // Test feedback expiration: simulate instant in the past
+        let past = std::time::Instant::now() - std::time::Duration::from_millis(3000);
+        app.refresh_feedback = Some(("[✓ Up to date]".to_string(), past));
+        app.on_tick();
+        assert!(app.refresh_feedback.is_none());
+
+        // Test feedback active: fresh instant
+        let fresh = std::time::Instant::now();
+        app.refresh_feedback = Some(("[✓ Up to date]".to_string(), fresh));
+        app.on_tick();
+        assert!(app.refresh_feedback.is_some());
     }
 }
 

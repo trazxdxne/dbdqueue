@@ -96,7 +96,7 @@ jobs:
         id: changelog
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          echo "## Dead by Daylight Queue Times & Region Locker CLI v$VERSION" > release_notes.md
+          echo "## Dead By Queue v$VERSION" > release_notes.md
           awk -v ver="$VERSION" '/^## \[/ { if ($0 ~ "^## \\[" ver "\\]") flag=1; else flag=0; next } flag' CHANGELOG.md >> release_notes.md
 
       - name: Create Release

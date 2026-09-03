@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-09-03
+
+### Changed
+- Rebranded project to **Dead By Queue** with updated titles and clean CLI/TUI descriptions across the codebase.
+- Changed theming: red for frames, titles, and accents, white for table headers.
+- Removed Lock column from the queue table, relying on accent-highlighted region names and header lock status.
+- Redesigned top header into a resilient, compact box (`Sort: ... │ Mode: ... │ Lock: ...`) with capitalized Mode display and defensive global lock status.
+- Consolidated table sorting into a single `[S]` key that smoothly cycles through `Killer` → `Survivor` → `Ping`.
+
+### Added
+- Fully non-blocking background refresh flow on `[R]` keypress: API queue fetch and AWS ping measurements now run in parallel without freezing the TUI event loop.
+- Live animated braille spinner (`⠋ Fetching...`) in the status bar while a refresh is in-flight.
+- Transient feedback indicators (`[✓ Up to date]` / `[✓ Updated]`) automatically reverting to true source data age (`API Updated: Xm ago`) after 2.5 seconds.
+
 ## [0.5.2] - 2026-09-03
 
 ### Fixed

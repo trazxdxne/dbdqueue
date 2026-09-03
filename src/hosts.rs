@@ -344,17 +344,17 @@ fn run_interactive_menu(
     
     loop {
         write!(stdout, "\x1b[H\x1b[2J").ok();
-        write!(stdout, "\x1b[1m\x1b[96m{}\x1b[0m\r\n", title).ok();
+        write!(stdout, "\x1b[1m\x1b[91m{}\x1b[0m\r\n", title).ok();
         write!(stdout, "{}\r\n\r\n", instructions).ok();
         
-        for (i, (display, code)) in options.iter().enumerate() {
+        for (i, (display, _)) in options.iter().enumerate() {
             let checked = if selected[i] { "[*]" } else { "[ ]" };
             let color = if selected[i] { "\x1b[92m" } else { "\x1b[90m" };
             
             if i == cursor_pos {
-                write!(stdout, " \x1b[7m {} {} ({}) \x1b[27m\r\n", checked, display, code).ok();
+                write!(stdout, " \x1b[7m {} {} \x1b[27m\r\n", checked, display).ok();
             } else {
-                write!(stdout, " {} {} {} ({})\x1b[0m\r\n", color, checked, display, code).ok();
+                write!(stdout, " {} {} {}\x1b[0m\r\n", color, checked, display).ok();
             }
         }
         stdout.flush().ok();
@@ -377,7 +377,7 @@ fn run_interactive_menu(
                     break;
                 }
                 KeyCode::Esc => {
-                    let cancel_msg = if is_russian() { "\r\n\x1b[93mОтменено.\x1b[0m\r\n" } else { "\r\n\x1b[93mCancelled.\x1b[0m\r\n" };
+                    let cancel_msg = if is_russian() { "\r\n\x1b[91mОтменено.\x1b[0m\r\n" } else { "\r\n\x1b[91mCancelled.\x1b[0m\r\n" };
                     disable_raw_mode().ok();
                     let _ = crossterm::execute!(stdout, cursor::Show);
                     write!(stdout, "{}", cancel_msg).ok();
@@ -385,7 +385,7 @@ fn run_interactive_menu(
                     return None;
                 }
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    let cancel_msg = if is_russian() { "\r\n\x1b[93mОтменено.\x1b[0m\r\n" } else { "\r\n\x1b[93mCancelled.\x1b[0m\r\n" };
+                    let cancel_msg = if is_russian() { "\r\n\x1b[91mОтменено.\x1b[0m\r\n" } else { "\r\n\x1b[91mCancelled.\x1b[0m\r\n" };
                     disable_raw_mode().ok();
                     let _ = crossterm::execute!(stdout, cursor::Show);
                     write!(stdout, "{}", cancel_msg).ok();
@@ -409,17 +409,42 @@ fn run_interactive_menu(
 }
 
 pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
-    let api_to_aws = crate::api::get_api_to_aws();
-    let mut regions: Vec<String> = api_to_aws.keys().map(|s| s.to_string()).collect();
-    regions.sort();
+    let is_ru = is_russian();
+    let pings = crate::ping::measure_all_regions_ping();
+    let mut aws_regions = crate::api::get_all_aws_regions();
+    aws_regions.sort_by(|&a, &b| {
+        let a_ping = pings.get(a).copied().unwrap_or(u32::MAX);
+        let b_ping = pings.get(b).copied().unwrap_or(u32::MAX);
+        a_ping.cmp(&b_ping).then_with(|| {
+            let aws_to_api = crate::api::get_aws_to_api();
+            let a_name = aws_to_api.get(a).unwrap_or(&a);
+            let b_name = aws_to_api.get(b).unwrap_or(&b);
+            a_name.cmp(b_name)
+        })
+    });
     
-    let options: Vec<(String, String)> = regions.iter()
-        .map(|r| (r.clone(), api_to_aws.get(r.as_str()).unwrap().to_string()))
+    let aws_to_api = crate::api::get_aws_to_api();
+    let aws_to_flag = crate::api::get_aws_to_flag();
+    
+    let options: Vec<(String, String)> = aws_regions.iter()
+        .map(|code| {
+            let name = aws_to_api.get(*code).unwrap_or(code);
+            let flag = aws_to_flag.get(*code).unwrap_or(&"");
+            let ping_str = if let Some(&ms) = pings.get(*code) {
+                format!(" - {} ms", ms)
+            } else {
+                String::new()
+            };
+            (format!("{}{} ({}){}", flag, name, code, ping_str), code.to_string())
+        })
         .collect();
         
-    let is_ru = is_russian();
-    let title = if is_ru { "=== DBD Блокировка Регионов (Интерактивный Режим) ===" } else { "=== DBD Region Locker (Interactive Mode) ===" };
-    let instructions = if is_ru { "Навигация: СТРЕЛКИ | Переключить: ПРОБЕЛ | Сохранить: ENTER | Выход: Ctrl+C" } else { "Navigate: ARROWS | Toggle: SPACE | Lock & Save: ENTER | Quit: Ctrl+C" };
+    let title = if is_ru { "Блокировка регионов" } else { "Region Locker" };
+    let instructions = if is_ru {
+        "\x1b[91m[↑↓]\x1b[0m \x1b[90mВыбор\x1b[0m  \x1b[91m[Пробел]\x1b[0m \x1b[90mВкл/Выкл\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mСохранить\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mОтмена\x1b[0m"
+    } else {
+        "\x1b[91m[↑↓]\x1b[0m \x1b[90mSelect\x1b[0m  \x1b[91m[Space]\x1b[0m \x1b[90mToggle\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mSave\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mCancel\x1b[0m"
+    };
         
     run_interactive_menu(
         title,
@@ -439,8 +464,12 @@ pub fn interactive_priority_menu(current_priority: &[String]) -> Option<Vec<Stri
         .collect();
         
     let is_ru = is_russian();
-    let title = if is_ru { "=== DBD Приоритетные Регионы (Интерактивный Режим) ===" } else { "=== DBD Priority Regions (Interactive Mode) ===" };
-    let instructions = if is_ru { "Навигация: СТРЕЛКИ | Переключить: ПРОБЕЛ | Сохранить: ENTER | Выход: Ctrl+C" } else { "Navigate: ARROWS | Toggle: SPACE | Save: ENTER | Quit: Ctrl+C" };
+    let title = if is_ru { "Приоритетные регионы" } else { "Priority Regions" };
+    let instructions = if is_ru {
+        "\x1b[91m[↑↓]\x1b[0m \x1b[90mВыбор\x1b[0m  \x1b[91m[Пробел]\x1b[0m \x1b[90mВкл/Выкл\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mСохранить\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mОтмена\x1b[0m"
+    } else {
+        "\x1b[91m[↑↓]\x1b[0m \x1b[90mSelect\x1b[0m  \x1b[91m[Space]\x1b[0m \x1b[90mToggle\x1b[0m  \x1b[91m[Enter]\x1b[0m \x1b[90mSave\x1b[0m  \x1b[91m[Esc]\x1b[0m \x1b[90mCancel\x1b[0m"
+    };
         
     run_interactive_menu(
         title,

@@ -69,7 +69,7 @@ $USE_SUDO cp "$TEMP_FILE" "$INSTALL_DIR/dbdq"
 $USE_SUDO mv "$TEMP_FILE" "$INSTALL_DIR/dbdqueue"
 $USE_SUDO chmod +x "$INSTALL_DIR/dbdq" "$INSTALL_DIR/dbdqueue"
 
-echo "${GREEN}==>${NC} dbdqueue has been installed successfully!"
+echo "${GREEN}==>${NC} Dead By Queue has been installed successfully!"
 echo "You can now run it anytime by typing: ${YELLOW}dbdq${NC} or ${YELLOW}dbdqueue${NC}"
 
 # Verify if PATH contains the directory

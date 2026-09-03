@@ -54,7 +54,7 @@ if ($env:Path -notlike "*$installDir*") {
     $env:Path = "${installDir};$env:Path"
 }
 
-Write-Host "==> dbdqueue installed successfully!" -ForegroundColor Green
+Write-Host "==> Dead By Queue installed successfully!" -ForegroundColor Green
 Write-Host "You can now run it anytime from any terminal: dbdq or dbdqueue`n" -ForegroundColor Yellow
 
 # 5. Launch dbdq
