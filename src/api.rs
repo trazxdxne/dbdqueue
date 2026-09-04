@@ -95,7 +95,7 @@ pub fn get_disabled_aws_regions(queues: &[RegionQueueData]) -> std::collections:
     disabled
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RegionQueueData {
     pub flag: String,
     pub name: String,

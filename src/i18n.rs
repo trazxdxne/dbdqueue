@@ -102,6 +102,11 @@ pub enum TextKey {
     HostsUpdated,
     HostsAlreadyUpToDate,
     HostsElevationFailed,
+    SummaryTitle,
+    SummaryKiller,
+    SummarySurvivor,
+    SummaryPing,
+    SummarySimilar,
 }
 
 pub fn tr(locale: Locale, key: TextKey) -> &'static str {
@@ -144,6 +149,11 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::HostsUpdated => "Region locks updated!",
             TextKey::HostsAlreadyUpToDate => "Hosts file is up to date",
             TextKey::HostsElevationFailed => "Error: admin elevation denied",
+            TextKey::SummaryTitle => "Best pick now",
+            TextKey::SummaryKiller => "Killer:",
+            TextKey::SummarySurvivor => "Survivor:",
+            TextKey::SummaryPing => "Ping:",
+            TextKey::SummarySimilar => "similar",
         },
         Locale::Ru => match key {
             TextKey::HeaderTitle => " Dead By Queue ",
@@ -183,6 +193,11 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::HostsUpdated => "Блокировка регионов обновлена!",
             TextKey::HostsAlreadyUpToDate => "Файл hosts уже актуален",
             TextKey::HostsElevationFailed => "Ошибка: отказ в правах Администратора",
+            TextKey::SummaryTitle => "Лучший выбор сейчас",
+            TextKey::SummaryKiller => "Маньяк:",
+            TextKey::SummarySurvivor => "Выживший:",
+            TextKey::SummaryPing => "Пинг:",
+            TextKey::SummarySimilar => "похожих",
         },
     }
 }

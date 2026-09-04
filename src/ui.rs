@@ -3,7 +3,7 @@ use crate::app::{App, NoticeKind, SPINNER_FRAMES};
 use crate::i18n::{TextKey, format_time_diff, tr, tr_mode, tr_sort};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table},
@@ -16,6 +16,7 @@ pub const EMPTY_TABLE_HEIGHT: u16 = 6;
 pub const TABLE_CHROME_HEIGHT: u16 = 4;
 pub const MODAL_WIDTH_PERCENT: u16 = 65;
 pub const MODAL_HEIGHT_PERCENT: u16 = 80;
+pub const TABLE_WIDTH: u16 = 24 + 12 + 14 + 14 + 3 + 2;
 
 pub fn color_for_time(time_str: &str) -> Color {
     if time_str == "—" || time_str.is_empty() {
@@ -204,7 +205,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
         (
             r,
             [
-                Constraint::Min(24),
+                Constraint::Length(24),
                 Constraint::Length(12),
                 Constraint::Length(14),
                 Constraint::Length(14),
@@ -389,6 +390,152 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
     f.render_widget(footer_widget, modal_chunks[1]);
 }
 
+pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
+    if area.height < 5 {
+        return;
+    }
+
+    let summary_area = if area.width < TABLE_WIDTH {
+        area
+    } else {
+        Layout::horizontal([Constraint::Length(TABLE_WIDTH)])
+            .flex(Flex::Center)
+            .split(area)[0]
+    };
+
+    let summary = app.summary();
+    let api_to_aws = api::get_api_to_aws();
+
+    let format_label = |key: TextKey| -> String {
+        let label_str = tr(app.locale, key);
+        let pad = 11usize.saturating_sub(label_str.chars().count());
+        format!("{}{}", label_str, " ".repeat(pad))
+    };
+
+    let format_pick_line =
+        |key: TextKey, pick: Option<&crate::app::BestPick<'_>>, is_killer: bool| -> Line<'_> {
+            let label_span = Span::styled(format_label(key), Style::default().fg(Color::DarkGray));
+            if let Some(best) = pick {
+                let time_str = if is_killer {
+                    &best.row.killer
+                } else {
+                    &best.row.survivor
+                };
+                let time_color = color_for_time(time_str);
+                let time_span = Span::styled(time_str.clone(), Style::default().fg(time_color));
+
+                let reg_str = if best.row.flag.is_empty() {
+                    best.row.name.clone()
+                } else {
+                    format!("{} {}", best.row.flag, best.row.name)
+                };
+                let aws_code = api_to_aws.get(best.row.name.as_str()).unwrap_or(&"");
+                let is_locked = app.locked.contains(*aws_code);
+                let name_style = if is_locked {
+                    Style::default()
+                        .fg(Color::LightRed)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().add_modifier(Modifier::BOLD)
+                };
+                let name_span = Span::styled(reg_str, name_style);
+
+                let ping = app.pings.get(*aws_code).copied();
+                let (ping_text, ping_color) = if let Some(ms) = ping {
+                    (
+                        format!("({} ms)", ms),
+                        crate::ping::color_for_ping(Some(ms)),
+                    )
+                } else {
+                    ("(—)".to_string(), Color::DarkGray)
+                };
+                let ping_span = Span::styled(ping_text, Style::default().fg(ping_color));
+
+                let mut spans = vec![
+                    label_span,
+                    time_span,
+                    Span::raw("  "),
+                    name_span,
+                    Span::raw("  "),
+                    ping_span,
+                ];
+
+                if best.similar > 0 {
+                    spans.push(Span::raw("  "));
+                    let sim_str = format!(
+                        "+{} {}",
+                        best.similar,
+                        tr(app.locale, TextKey::SummarySimilar)
+                    );
+                    spans.push(Span::styled(sim_str, Style::default().fg(Color::DarkGray)));
+                }
+
+                Line::from(spans)
+            } else {
+                Line::from(vec![
+                    label_span,
+                    Span::styled("—", Style::default().fg(Color::DarkGray)),
+                ])
+            }
+        };
+
+    let killer_line = format_pick_line(TextKey::SummaryKiller, summary.killer.as_ref(), true);
+    let survivor_line =
+        format_pick_line(TextKey::SummarySurvivor, summary.survivor.as_ref(), false);
+
+    let ping_line = {
+        let label_span = Span::styled(
+            format_label(TextKey::SummaryPing),
+            Style::default().fg(Color::DarkGray),
+        );
+        if let Some(row) = summary.lowest_ping {
+            let aws_code = api_to_aws.get(row.name.as_str()).unwrap_or(&"");
+            let ping = app.pings.get(*aws_code).copied();
+            let (ping_text, ping_color) = if let Some(ms) = ping {
+                (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
+            } else {
+                ("—".to_string(), Color::DarkGray)
+            };
+            let ping_span = Span::styled(ping_text, Style::default().fg(ping_color));
+
+            let reg_str = if row.flag.is_empty() {
+                row.name.clone()
+            } else {
+                format!("{} {}", row.flag, row.name)
+            };
+            let is_locked = app.locked.contains(*aws_code);
+            let name_style = if is_locked {
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().add_modifier(Modifier::BOLD)
+            };
+            let name_span = Span::styled(reg_str, name_style);
+
+            Line::from(vec![label_span, ping_span, Span::raw("  "), name_span])
+        } else {
+            Line::from(vec![
+                label_span,
+                Span::styled("—", Style::default().fg(Color::DarkGray)),
+            ])
+        }
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray))
+        .title(Span::styled(
+            format!(" {} ", tr(app.locale, TextKey::SummaryTitle)),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ));
+
+    let paragraph = Paragraph::new(vec![killer_line, survivor_line, ping_line]).block(block);
+    f.render_widget(paragraph, summary_area);
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     let rows_data = app.get_filtered_sorted_rows();
     let is_empty = rows_data.is_empty();
@@ -416,8 +563,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ])
         .split(f.area());
 
+    let table_area = if chunks[1].width < TABLE_WIDTH {
+        chunks[1]
+    } else {
+        Layout::horizontal([Constraint::Length(TABLE_WIDTH)])
+            .flex(Flex::Center)
+            .split(chunks[1])[0]
+    };
+
     draw_header(f, app, chunks[0]);
-    draw_table(f, app, chunks[1]);
+    draw_table(f, app, table_area);
+    draw_summary(f, app, chunks[2]);
     draw_footer(f, app, chunks[3]);
 
     if app.show_lock_modal {
@@ -501,10 +657,28 @@ mod tests {
             SortOrder::Default,
             GameMode::Standard,
             vec![],
-            vec![],
+            vec!["eu-central-1".to_string()],
             Language::En,
             None,
         );
+        app.queues = vec![
+            api::RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "6s".to_string(),
+            },
+            api::RegionQueueData {
+                flag: "[IE]".to_string(),
+                name: "Dublin".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "12s".to_string(),
+                killer: "8s".to_string(),
+            },
+        ];
+        app.pings.insert("eu-central-1".to_string(), 35);
+        app.pings.insert("eu-west-1".to_string(), 45);
         app.table_state.select(Some(0));
 
         let backend = TestBackend::new(80, 24);
@@ -514,5 +688,91 @@ mod tests {
 
         // Ensure table selection was not cleared by draw()
         assert_eq!(app.table_state.selected(), Some(0));
+
+        // Verify summary panel was drawn and exercised
+        let buffer = terminal.backend().buffer();
+        let mut found_summary = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Best pick now") {
+                found_summary = true;
+                break;
+            }
+        }
+        assert!(found_summary, "Summary panel should be rendered in buffer");
+    }
+
+    #[test]
+    fn test_draw_summary_russian_and_skip_height() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            vec![],
+            vec!["eu-central-1".to_string()],
+            Language::Ru,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "6s".to_string(),
+            },
+            api::RegionQueueData {
+                flag: "[IE]".to_string(),
+                name: "Dublin".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "6s".to_string(),
+            },
+        ];
+        app.pings.insert("eu-central-1".to_string(), 35);
+        app.pings.insert("eu-west-1".to_string(), 45);
+
+        // Test skip rendering when height < 5
+        let backend_small = TestBackend::new(80, 4);
+        let mut term_small = Terminal::new(backend_small).unwrap();
+        term_small
+            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 4)))
+            .unwrap();
+        let buf_small = term_small.backend().buffer();
+        for y in 0..4 {
+            let line: String = (0..80)
+                .map(|x| buf_small[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            assert!(!line.contains("Лучший выбор сейчас"));
+        }
+
+        // Test Russian rendering when height >= 5
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 10)))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+        let mut found_title = false;
+        let mut found_killer = false;
+        let mut found_similar = false;
+        for y in 0..10 {
+            let line: String = (0..80)
+                .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Лучший выбор сейчас") {
+                found_title = true;
+            }
+            if line.contains("Маньяк:") {
+                found_killer = true;
+            }
+            if line.contains("+1 похожих") {
+                found_similar = true;
+            }
+        }
+        assert!(found_title, "Should contain Russian summary title");
+        assert!(found_killer, "Should contain Russian killer label");
+        assert!(found_similar, "Should contain Russian similar suffix");
     }
 }

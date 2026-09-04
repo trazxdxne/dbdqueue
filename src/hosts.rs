@@ -100,6 +100,7 @@ pub fn build_hosts_content(
 pub enum UpdateHostsResult {
     Updated,
     AlreadyUpToDate,
+    #[allow(dead_code)]
     ElevationFailed,
     Error(String),
 }
