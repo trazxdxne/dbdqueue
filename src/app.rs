@@ -97,7 +97,33 @@ pub enum Direction {
     Down,
 }
 
-pub const NEAR_BEST_TOLERANCE_SECS: u32 = 10;
+pub const SIMILAR_PING_TOLERANCE_MS: u32 = 25;
+pub const SIMILAR_TIME_TOLERANCE_SECS: u32 = 15;
+
+pub fn ping_penalty(ping: u32, is_killer: bool) -> u32 {
+    if is_killer {
+        match ping {
+            0..=70 => 0,
+            71..=100 => 15,
+            101..=140 => 95,
+            141..=180 => 130,
+            181..=220 => 190,
+            221..=250 => 270,
+            _ => 500u32.saturating_add(ping.saturating_sub(250).saturating_mul(4)),
+        }
+    } else {
+        match ping {
+            0..=60 => 0,
+            61..=90 => 20,
+            91..=120 => 70,
+            121..=150 => 120,
+            151..=180 => 180,
+            181..=220 => 260,
+            221..=250 => 360,
+            _ => 600u32.saturating_add(ping.saturating_sub(250).saturating_mul(5)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BestPick<'a> {
@@ -534,10 +560,17 @@ impl App {
     }
 
     pub fn summary(&self) -> Summary<'_> {
+        let api_to_aws = api::get_api_to_aws();
+
+        let get_ping = |row: &RegionQueueData| -> Option<u32> {
+            let code = api_to_aws.get(row.name.as_str())?;
+            self.pings.get(*code).copied()
+        };
+
         let eligible_rows: Vec<&RegionQueueData> = self
             .get_filtered_sorted_rows()
             .into_iter()
-            .filter(|r| !r.is_disabled())
+            .filter(|r| !r.is_disabled() && get_ping(r).is_some())
             .collect();
 
         if eligible_rows.is_empty() {
@@ -548,53 +581,50 @@ impl App {
             };
         }
 
-        let api_to_aws = api::get_api_to_aws();
+        let pick_best =
+            |get_time_str: fn(&RegionQueueData) -> &str, is_killer: bool| -> Option<BestPick<'_>> {
+                let mut valid_candidates: Vec<(&RegionQueueData, u32, u32, u32)> = Vec::new();
 
-        let get_ping = |row: &RegionQueueData| -> Option<u32> {
-            let code = api_to_aws.get(row.name.as_str())?;
-            self.pings.get(*code).copied()
-        };
-
-        let pick_best = |get_time_str: fn(&RegionQueueData) -> &str| -> Option<BestPick<'_>> {
-            let mut min_secs = u32::MAX;
-            for &row in &eligible_rows {
-                let secs = api::parse_time_to_seconds(get_time_str(row));
-                if secs < min_secs {
-                    min_secs = secs;
-                }
-            }
-
-            if min_secs >= 999999 {
-                return None;
-            }
-
-            let max_secs = min_secs.saturating_add(NEAR_BEST_TOLERANCE_SECS);
-            let candidates: Vec<&RegionQueueData> = eligible_rows
-                .iter()
-                .copied()
-                .filter(|row| {
+                for &row in &eligible_rows {
                     let secs = api::parse_time_to_seconds(get_time_str(row));
-                    secs <= max_secs
+                    if secs >= 999999 {
+                        continue;
+                    }
+                    let ping = get_ping(row)?;
+                    let penalty = ping_penalty(ping, is_killer);
+                    let score = secs.saturating_add(penalty);
+                    valid_candidates.push((row, score, ping, secs));
+                }
+
+                if valid_candidates.is_empty() {
+                    return None;
+                }
+
+                let best_tuple = valid_candidates
+                    .iter()
+                    .min_by_key(|(row, score, ping, secs)| (*score, *ping, *secs, &row.name))?;
+
+                let best_row = best_tuple.0;
+                let best_ping = best_tuple.2;
+                let best_secs = best_tuple.3;
+
+                let similar = valid_candidates
+                    .iter()
+                    .filter(|(r, _, ping, secs)| {
+                        r.name != best_row.name
+                            && ping.abs_diff(best_ping) <= SIMILAR_PING_TOLERANCE_MS
+                            && secs.abs_diff(best_secs) <= SIMILAR_TIME_TOLERANCE_SECS
+                    })
+                    .count();
+
+                Some(BestPick {
+                    row: best_row,
+                    similar,
                 })
-                .collect();
+            };
 
-            if candidates.is_empty() {
-                return None;
-            }
-
-            let best = candidates.iter().copied().min_by_key(|row| {
-                let ping = get_ping(row).unwrap_or(u32::MAX);
-                let secs = api::parse_time_to_seconds(get_time_str(row));
-                (ping, secs, &row.name)
-            })?;
-
-            let similar = candidates.len() - 1;
-
-            Some(BestPick { row: best, similar })
-        };
-
-        let killer = pick_best(|r| &r.killer);
-        let survivor = pick_best(|r| &r.survivor);
+        let killer = pick_best(|r| &r.killer, true);
+        let survivor = pick_best(|r| &r.survivor, false);
 
         let lowest_ping = eligible_rows
             .iter()
@@ -976,13 +1006,14 @@ mod tests {
         let summary = app.summary();
         let killer_pick = summary.killer.expect("killer pick should be present");
         assert_eq!(killer_pick.row.name, "Dublin");
-        assert_eq!(killer_pick.similar, 3);
+        // Only Frankfurt (50ms) is within SIMILAR_PING_TOLERANCE_MS (25ms) of Dublin (25ms)
+        assert_eq!(killer_pick.similar, 1);
         assert_eq!(summary.lowest_ping.unwrap().name, "Dublin");
     }
 
     #[test]
     fn test_summary_within_tolerance_lower_ping_wins() {
-        // (b) 6s region with 296 ms vs 9s region with 40 ms → the 9s region wins (within tolerance), similar == 1;
+        // 6s region with 296 ms vs 9s region with 40 ms → the 9s region wins
         let mut app = make_test_app();
         app.queues = vec![
             RegionQueueData {
@@ -1006,12 +1037,13 @@ mod tests {
         let summary = app.summary();
         let killer_pick = summary.killer.expect("killer pick should be present");
         assert_eq!(killer_pick.row.name, "Dublin");
-        assert_eq!(killer_pick.similar, 1);
+        // 296ms vs 40ms exceeds ping tolerance, so similar is 0
+        assert_eq!(killer_pick.similar, 0);
     }
 
     #[test]
     fn test_summary_outside_tolerance_lower_ping_loses() {
-        // (c) 6s vs 30s → 6s wins even if 30s has lower ping (outside tolerance), similar == 0;
+        // 6s vs 30s → 6s wins even if 30s has lower ping (outside tolerance), similar == 0;
         let mut app = make_test_app();
         app.queues = vec![
             RegionQueueData {
@@ -1069,8 +1101,8 @@ mod tests {
     }
 
     #[test]
-    fn test_summary_unmeasured_ping_loses_to_measured() {
-        // (e) region at 6s with no measured ping loses to a measured 6s region;
+    fn test_summary_unmeasured_ping_ignored_from_candidates() {
+        // (e) region with no measured ping is excluded from Best pick candidates
         let mut app = make_test_app();
         app.queues = vec![
             RegionQueueData {
@@ -1094,7 +1126,165 @@ mod tests {
         let summary = app.summary();
         let killer_pick = summary.killer.expect("killer pick should be present");
         assert_eq!(killer_pick.row.name, "Frankfurt");
+        assert_eq!(killer_pick.similar, 0);
+    }
+
+    #[test]
+    fn test_summary_unplayable_high_ping_loses_to_reasonable_queue() {
+        // Tokyo 286ms @ 6s vs Frankfurt 150ms @ 1m (60s) -> Frankfurt must win
+        let mut app = make_test_app();
+        app.queues = vec![
+            RegionQueueData {
+                flag: "[JP]".to_string(),
+                name: "Tokyo".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "6s".to_string(),
+                killer: "6s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "1m".to_string(),
+                killer: "1m".to_string(),
+            },
+        ];
+        app.pings.insert("ap-northeast-1".to_string(), 286);
+        app.pings.insert("eu-central-1".to_string(), 150);
+
+        let summary = app.summary();
+        let killer_pick = summary.killer.expect("killer pick should be present");
+        let survivor_pick = summary.survivor.expect("survivor pick should be present");
+        assert_eq!(killer_pick.row.name, "Frankfurt");
+        assert_eq!(survivor_pick.row.name, "Frankfurt");
+    }
+
+    #[test]
+    fn test_summary_five_minutes_wait_loses_to_playable_high_ping() {
+        // Duel 2: Frankfurt 80ms @ 5m (300s) vs Tokyo 220ms @ 10s -> 5m is too long, Tokyo wins
+        let mut app = make_test_app();
+        app.queues = vec![
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "5m".to_string(),
+                killer: "5m".to_string(),
+            },
+            RegionQueueData {
+                flag: "[JP]".to_string(),
+                name: "Tokyo".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "10s".to_string(),
+            },
+        ];
+        app.pings.insert("eu-central-1".to_string(), 80);
+        app.pings.insert("ap-northeast-1".to_string(), 220);
+
+        let summary = app.summary();
+        let killer_pick = summary.killer.expect("killer pick should be present");
+        let survivor_pick = summary.survivor.expect("survivor pick should be present");
+        assert_eq!(killer_pick.row.name, "Tokyo");
+        assert_eq!(survivor_pick.row.name, "Tokyo");
+    }
+
+    #[test]
+    fn test_summary_role_tolerance_difference() {
+        // 160ms @ 10s vs 60ms @ 150s (2m 30s):
+        // For Killer: 160ms is playable (+130s penalty => 140s vs 150s => 160ms wins)
+        // For Survivor: 160ms is painful (+180s penalty => 190s vs 150s => 60ms wins)
+        let mut app = make_test_app();
+        app.queues = vec![
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "2m 30s".to_string(),
+                killer: "2m 30s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[US]".to_string(),
+                name: "Virginia".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "10s".to_string(),
+            },
+        ];
+        app.pings.insert("eu-central-1".to_string(), 60);
+        app.pings.insert("us-east-1".to_string(), 160);
+
+        let summary = app.summary();
+        let killer_pick = summary.killer.expect("killer pick should be present");
+        let survivor_pick = summary.survivor.expect("survivor pick should be present");
+        assert_eq!(killer_pick.row.name, "Virginia");
+        assert_eq!(survivor_pick.row.name, "Frankfurt");
+    }
+
+    #[test]
+    fn test_summary_similar_requires_both_ping_and_time() {
+        let mut app = make_test_app();
+        app.queues = vec![
+            RegionQueueData {
+                flag: "[IE]".to_string(),
+                name: "Dublin".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "10s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[GB]".to_string(),
+                name: "London".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "15s".to_string(),
+                killer: "15s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "12s".to_string(),
+                killer: "12s".to_string(),
+            },
+            RegionQueueData {
+                flag: "[US]".to_string(),
+                name: "Ohio".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "40s".to_string(),
+                killer: "40s".to_string(),
+            },
+        ];
+        // Dublin: 25ms, 10s (winner)
+        // London: 35ms, 15s (ping diff 10 <= 25, time diff 5 <= 15 => similar!)
+        // Frankfurt: 70ms, 12s (ping diff 45 > 25 => not similar)
+        // Ohio: 30ms, 40s (time diff 30 > 15 => not similar)
+        app.pings.insert("eu-west-1".to_string(), 25);
+        app.pings.insert("eu-west-2".to_string(), 35);
+        app.pings.insert("eu-central-1".to_string(), 70);
+        app.pings.insert("us-east-2".to_string(), 30);
+
+        let summary = app.summary();
+        let killer_pick = summary.killer.expect("killer pick should be present");
+        assert_eq!(killer_pick.row.name, "Dublin");
         assert_eq!(killer_pick.similar, 1);
+    }
+
+    #[test]
+    fn test_summary_all_unmeasured_returns_none() {
+        let mut app = make_test_app();
+        app.queues = vec![RegionQueueData {
+            flag: "[DE]".to_string(),
+            name: "Frankfurt".to_string(),
+            mode: "Standard".to_string(),
+            survivor: "10s".to_string(),
+            killer: "10s".to_string(),
+        }];
+        app.pings.clear();
+
+        let summary = app.summary();
+        assert!(summary.killer.is_none());
+        assert!(summary.survivor.is_none());
+        assert!(summary.lowest_ping.is_none());
     }
 
     #[test]

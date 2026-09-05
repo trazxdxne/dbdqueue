@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-09-05
+
+### Changed
+- Reworked 'Best pick' recommendation algorithm to balance queue wait time and latency using a role-aware cost function (Killer vs Survivor) rather than a rigid greedy queue-time window.
+- Excluded unmeasured ping regions from Best pick recommendations until latency is measured.
+- Refined `+N similar` metric to require both latency proximity (<= 25 ms) and queue time proximity (<= 15 s).
+- Removed redundant `Ping:` row from the 'Best pick now' summary panel.
+- Tightly constrained summary panel height to 4 lines (content + borders) ending immediately after the Survivor row, keeping extra space outside below the panel.
+
+### Fixed
+- Aligned summary panel rows into consistent columns (`label`, `time`, `region`, `ping`, `similar`).
+- Cleaned up ping formatting in summary panel to display clean values (e.g. `76 ms`) without parentheses.
+
 ## [0.6.1] - 2026-09-05
 
 ### Added

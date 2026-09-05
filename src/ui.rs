@@ -17,6 +17,11 @@ pub const TABLE_CHROME_HEIGHT: u16 = 4;
 pub const MODAL_WIDTH_PERCENT: u16 = 65;
 pub const MODAL_HEIGHT_PERCENT: u16 = 80;
 pub const TABLE_WIDTH: u16 = 24 + 12 + 14 + 14 + 3 + 2;
+pub const SUMMARY_HEIGHT: u16 = 4;
+pub const SUMMARY_LABEL_WIDTH: usize = 11;
+pub const SUMMARY_TIME_WIDTH: usize = 8;
+pub const SUMMARY_REGION_WIDTH: usize = 18;
+pub const SUMMARY_PING_WIDTH: usize = 9;
 
 pub fn color_for_time(time_str: &str) -> Color {
     if time_str == "—" || time_str.is_empty() {
@@ -391,11 +396,11 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
-    if area.height < 5 {
+    if area.height < SUMMARY_HEIGHT {
         return;
     }
 
-    let summary_area = if area.width < TABLE_WIDTH {
+    let centered_area = if area.width < TABLE_WIDTH {
         area
     } else {
         Layout::horizontal([Constraint::Length(TABLE_WIDTH)])
@@ -403,12 +408,19 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
             .split(area)[0]
     };
 
+    let summary_area = Rect {
+        x: centered_area.x,
+        y: centered_area.y,
+        width: centered_area.width,
+        height: SUMMARY_HEIGHT,
+    };
+
     let summary = app.summary();
     let api_to_aws = api::get_api_to_aws();
 
     let format_label = |key: TextKey| -> String {
         let label_str = tr(app.locale, key);
-        let pad = 11usize.saturating_sub(label_str.chars().count());
+        let pad = SUMMARY_LABEL_WIDTH.saturating_sub(label_str.chars().count());
         format!("{}{}", label_str, " ".repeat(pad))
     };
 
@@ -422,7 +434,9 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
                     &best.row.survivor
                 };
                 let time_color = color_for_time(time_str);
-                let time_span = Span::styled(time_str.clone(), Style::default().fg(time_color));
+                let time_pad = SUMMARY_TIME_WIDTH.saturating_sub(time_str.chars().count());
+                let padded_time = format!("{}{}", time_str, " ".repeat(time_pad));
+                let time_span = Span::styled(padded_time, Style::default().fg(time_color));
 
                 let reg_str = if best.row.flag.is_empty() {
                     best.row.name.clone()
@@ -438,30 +452,23 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
                 } else {
                     Style::default().add_modifier(Modifier::BOLD)
                 };
-                let name_span = Span::styled(reg_str, name_style);
+                let reg_pad = SUMMARY_REGION_WIDTH.saturating_sub(reg_str.chars().count());
+                let padded_reg = format!("{}{}", reg_str, " ".repeat(reg_pad));
+                let name_span = Span::styled(padded_reg, name_style);
 
                 let ping = app.pings.get(*aws_code).copied();
                 let (ping_text, ping_color) = if let Some(ms) = ping {
-                    (
-                        format!("({} ms)", ms),
-                        crate::ping::color_for_ping(Some(ms)),
-                    )
+                    (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
                 } else {
-                    ("(—)".to_string(), Color::DarkGray)
+                    ("—".to_string(), Color::DarkGray)
                 };
-                let ping_span = Span::styled(ping_text, Style::default().fg(ping_color));
+                let ping_pad = SUMMARY_PING_WIDTH.saturating_sub(ping_text.chars().count());
+                let padded_ping = format!("{}{}", ping_text, " ".repeat(ping_pad));
+                let ping_span = Span::styled(padded_ping, Style::default().fg(ping_color));
 
-                let mut spans = vec![
-                    label_span,
-                    time_span,
-                    Span::raw("  "),
-                    name_span,
-                    Span::raw("  "),
-                    ping_span,
-                ];
+                let mut spans = vec![label_span, time_span, name_span, ping_span];
 
                 if best.similar > 0 {
-                    spans.push(Span::raw("  "));
                     let sim_str = format!(
                         "+{} {}",
                         best.similar,
@@ -483,45 +490,6 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
     let survivor_line =
         format_pick_line(TextKey::SummarySurvivor, summary.survivor.as_ref(), false);
 
-    let ping_line = {
-        let label_span = Span::styled(
-            format_label(TextKey::SummaryPing),
-            Style::default().fg(Color::DarkGray),
-        );
-        if let Some(row) = summary.lowest_ping {
-            let aws_code = api_to_aws.get(row.name.as_str()).unwrap_or(&"");
-            let ping = app.pings.get(*aws_code).copied();
-            let (ping_text, ping_color) = if let Some(ms) = ping {
-                (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
-            } else {
-                ("—".to_string(), Color::DarkGray)
-            };
-            let ping_span = Span::styled(ping_text, Style::default().fg(ping_color));
-
-            let reg_str = if row.flag.is_empty() {
-                row.name.clone()
-            } else {
-                format!("{} {}", row.flag, row.name)
-            };
-            let is_locked = app.locked.contains(*aws_code);
-            let name_style = if is_locked {
-                Style::default()
-                    .fg(Color::LightRed)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().add_modifier(Modifier::BOLD)
-            };
-            let name_span = Span::styled(reg_str, name_style);
-
-            Line::from(vec![label_span, ping_span, Span::raw("  "), name_span])
-        } else {
-            Line::from(vec![
-                label_span,
-                Span::styled("—", Style::default().fg(Color::DarkGray)),
-            ])
-        }
-    };
-
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
@@ -532,7 +500,7 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
                 .add_modifier(Modifier::BOLD),
         ));
 
-    let paragraph = Paragraph::new(vec![killer_line, survivor_line, ping_line]).block(block);
+    let paragraph = Paragraph::new(vec![killer_line, survivor_line]).block(block);
     f.render_widget(paragraph, summary_area);
 }
 
@@ -733,21 +701,21 @@ mod tests {
         app.pings.insert("eu-central-1".to_string(), 35);
         app.pings.insert("eu-west-1".to_string(), 45);
 
-        // Test skip rendering when height < 5
-        let backend_small = TestBackend::new(80, 4);
+        // Test skip rendering when height < 4
+        let backend_small = TestBackend::new(80, 3);
         let mut term_small = Terminal::new(backend_small).unwrap();
         term_small
-            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 4)))
+            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 3)))
             .unwrap();
         let buf_small = term_small.backend().buffer();
-        for y in 0..4 {
+        for y in 0..3 {
             let line: String = (0..80)
                 .map(|x| buf_small[(x, y)].symbol().chars().next().unwrap_or(' '))
                 .collect();
             assert!(!line.contains("Лучший выбор сейчас"));
         }
 
-        // Test Russian rendering when height >= 5
+        // Test Russian rendering when height >= 4
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
@@ -774,5 +742,124 @@ mod tests {
         assert!(found_title, "Should contain Russian summary title");
         assert!(found_killer, "Should contain Russian killer label");
         assert!(found_similar, "Should contain Russian similar suffix");
+
+        // Verify that rows y >= 4 are completely empty (panel height tightly constrained to 4)
+        for y in 4..10 {
+            let line: String = (0..80)
+                .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            assert!(
+                line.trim().is_empty(),
+                "Line {} should be empty outside summary panel, got: '{}'",
+                y,
+                line
+            );
+        }
+    }
+
+    #[test]
+    fn test_draw_summary_alignment_and_tight_height() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            vec![],
+            vec!["eu-central-1".to_string()],
+            Language::En,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData {
+                flag: "[DE]".to_string(),
+                name: "Frankfurt".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "12s".to_string(),
+                killer: "6s".to_string(),
+            },
+            api::RegionQueueData {
+                flag: "[IE]".to_string(),
+                name: "Dublin".to_string(),
+                mode: "Standard".to_string(),
+                survivor: "12s".to_string(),
+                killer: "6s".to_string(),
+            },
+        ];
+        app.pings.insert("eu-central-1".to_string(), 62);
+        app.pings.insert("eu-west-1".to_string(), 70);
+
+        let backend = TestBackend::new(80, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal
+            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 10)))
+            .unwrap();
+        let buf = terminal.backend().buffer();
+
+        let l0: String = (0..80)
+            .map(|x| buf[(x, 0)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        let l1: String = (0..80)
+            .map(|x| buf[(x, 1)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        let l2: String = (0..80)
+            .map(|x| buf[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        let l3: String = (0..80)
+            .map(|x| buf[(x, 3)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+
+        // Check top border and title
+        assert!(l0.contains("Best pick now"), "Line 0 should have title");
+        assert!(l0.contains('┌'), "Line 0 should have top border");
+
+        // Check rows: Killer and Survivor present, Ping row deleted
+        assert!(l1.contains("Killer:"), "Line 1 should be killer row");
+        assert!(l2.contains("Survivor:"), "Line 2 should be survivor row");
+        assert!(
+            !l1.contains("Ping:") && !l2.contains("Ping:") && !l3.contains("Ping:"),
+            "Ping row must be deleted"
+        );
+
+        // Check bottom border at line 3
+        assert!(l3.contains('└'), "Line 3 should have bottom-left border");
+        assert!(l3.contains('┘'), "Line 3 should have bottom-right border");
+
+        // Check height tightening: lines 4..10 are empty
+        for y in 4..10 {
+            let line: String = (0..80)
+                .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            assert!(
+                line.trim().is_empty(),
+                "Line {} below height 4 must be empty, got: '{}'",
+                y,
+                line
+            );
+        }
+
+        // Check clean ping formatting: no parentheses around ping
+        assert!(
+            !l1.contains("(62 ms)") && !l1.contains('('),
+            "No parens around ping in killer row"
+        );
+        assert!(
+            !l2.contains("(62 ms)") && !l2.contains('('),
+            "No parens around ping in survivor row"
+        );
+        assert!(l1.contains("62 ms"), "Killer row should display 62 ms");
+        assert!(l2.contains("62 ms"), "Survivor row should display 62 ms");
+
+        // Check column alignment: region and ping must align vertically across Killer and Survivor
+        let reg_pos_1 = l1.find("[DE] Frankfurt").expect("Region in line 1");
+        let reg_pos_2 = l2.find("[DE] Frankfurt").expect("Region in line 2");
+        assert_eq!(
+            reg_pos_1, reg_pos_2,
+            "Region column should align between Killer and Survivor"
+        );
+
+        let ping_pos_1 = l1.find("62 ms").expect("Ping in line 1");
+        let ping_pos_2 = l2.find("62 ms").expect("Ping in line 2");
+        assert_eq!(
+            ping_pos_1, ping_pos_2,
+            "Ping column should align between Killer and Survivor"
+        );
     }
 }
