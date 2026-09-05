@@ -105,7 +105,6 @@ pub enum TextKey {
     SummaryTitle,
     SummaryKiller,
     SummarySurvivor,
-    SummaryPing,
     SummarySimilar,
 }
 
@@ -152,7 +151,6 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::SummaryTitle => "Best pick now",
             TextKey::SummaryKiller => "Killer:",
             TextKey::SummarySurvivor => "Survivor:",
-            TextKey::SummaryPing => "Ping:",
             TextKey::SummarySimilar => "similar",
         },
         Locale::Ru => match key {
@@ -196,7 +194,6 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::SummaryTitle => "Лучший выбор сейчас",
             TextKey::SummaryKiller => "Маньяк:",
             TextKey::SummarySurvivor => "Выживший:",
-            TextKey::SummaryPing => "Пинг:",
             TextKey::SummarySimilar => "похожих",
         },
     }
