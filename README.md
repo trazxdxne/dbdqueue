@@ -156,7 +156,6 @@ dbdq --sort survivor
 # Filter by matchmaking mode
 dbdq --mode standard
 dbdq --mode event
-dbdq --mode both
 
 # Lock to specific AWS regions (blocks all other matchmaking regions)
 dbdq lock frankfurt dublin
@@ -175,7 +174,7 @@ dbdq unlock
 Settings are saved in TOML format:
 
 ```toml
-mode = "Standard"       # "Standard", "Event", or "Both"
+mode = "Standard"       # "Standard" or "Event"
 sort = "Killer"         # "Killer", "Survivor", "Ping", or "Default"
 locked = ["eu-central-1"] # Whitelisted AWS region codes
 lang = "auto"           # "auto", "en", or "ru"

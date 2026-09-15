@@ -46,7 +46,16 @@ pub enum GameMode {
     #[default]
     Standard,
     Event,
-    Both,
+}
+
+impl GameMode {
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Standard => Self::Event,
+            Self::Event => Self::Standard,
+        }
+    }
 }
 
 impl<'de> Deserialize<'de> for GameMode {
@@ -57,8 +66,7 @@ impl<'de> Deserialize<'de> for GameMode {
         let s = String::deserialize(deserializer).unwrap_or_default();
         Ok(match s.to_lowercase().as_str() {
             "event" => GameMode::Event,
-            "both" => GameMode::Both,
-            "standard" => GameMode::Standard,
+            "both" | "standard" => GameMode::Standard,
             _ => GameMode::Standard,
         })
     }
@@ -72,7 +80,6 @@ impl Serialize for GameMode {
         match self {
             GameMode::Standard => serializer.serialize_str("standard"),
             GameMode::Event => serializer.serialize_str("event"),
-            GameMode::Both => serializer.serialize_str("both"),
         }
     }
 }
@@ -116,8 +123,6 @@ impl Serialize for Language {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     #[serde(default)]
-    pub priority: Vec<String>,
-    #[serde(default)]
     pub locked: Vec<String>,
     #[serde(default)]
     pub sort: SortOrder,
@@ -132,7 +137,6 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         AppConfig {
-            priority: vec![],
             locked: vec![],
             sort: SortOrder::Default,
             mode: GameMode::Standard,
@@ -211,14 +215,12 @@ mod tests {
         assert_eq!(config.sort, SortOrder::Default);
         assert_eq!(config.mode, GameMode::Standard);
         assert_eq!(config.lang, Language::Auto);
-        assert!(config.priority.is_empty());
         assert!(config.locked.is_empty());
 
         let new_config = AppConfig {
             sort: SortOrder::Survivor,
             mode: GameMode::Event,
             lang: Language::Ru,
-            priority: vec!["Frankfurt".to_string(), "London".to_string()],
             locked: vec!["eu-central-1".to_string()],
             api_url: None,
         };
@@ -228,9 +230,6 @@ mod tests {
         assert_eq!(loaded.sort, SortOrder::Survivor);
         assert_eq!(loaded.mode, GameMode::Event);
         assert_eq!(loaded.lang, Language::Ru);
-        assert_eq!(loaded.priority.len(), 2);
-        assert_eq!(loaded.priority[0], "Frankfurt");
-        assert_eq!(loaded.priority[1], "London");
         assert_eq!(loaded.locked, vec!["eu-central-1"]);
 
         let _ = fs::remove_file(test_path);
@@ -240,15 +239,14 @@ mod tests {
     fn test_config_backward_compatibility() {
         let legacy_toml = r#"
             sort = "killer"
-            mode = "standard"
+            mode = "both"
             priority = ["Virginia"]
             locked = ["us-east-1"]
         "#;
         let config: AppConfig = toml::from_str(legacy_toml).unwrap();
         assert_eq!(config.sort, SortOrder::Killer);
-        assert_eq!(config.mode, GameMode::Standard);
+        assert_eq!(config.mode, GameMode::Standard); // "both" maps to Standard
         assert_eq!(config.lang, Language::Auto); // Missing lang defaults to Auto
-        assert_eq!(config.priority, vec!["Virginia"]);
         assert_eq!(config.locked, vec!["us-east-1"]);
 
         // Unknown values fallback to defaults
@@ -294,7 +292,6 @@ mod tests {
         let loaded = load_config(toml_path);
         assert_eq!(loaded.sort, SortOrder::Killer);
         assert_eq!(loaded.mode, GameMode::Standard);
-        assert_eq!(loaded.priority, vec!["Virginia"]);
         assert_eq!(loaded.locked, vec!["us-east-1"]);
 
         let _ = fs::remove_file(toml_path);

@@ -157,7 +157,6 @@ pub struct App {
     pub pings: HashMap<String, u32>,
     pub sort: SortOrder,
     pub mode: GameMode,
-    pub priority: Vec<String>,
     pub locked: HashSet<String>,
     pub notice: Option<Notice>,
     pub should_quit: bool,
@@ -176,7 +175,6 @@ impl App {
     pub fn new(
         sort: SortOrder,
         mode: GameMode,
-        priority: Vec<String>,
         locked: Vec<String>,
         lang: Language,
         api_url: Option<String>,
@@ -188,7 +186,6 @@ impl App {
             pings: HashMap::new(),
             sort,
             mode,
-            priority,
             locked: locked.into_iter().collect(),
             notice: None,
             should_quit: false,
@@ -208,7 +205,6 @@ impl App {
         let mut locked_vec: Vec<String> = self.locked.iter().cloned().collect();
         locked_vec.sort();
         AppConfig {
-            priority: self.priority.clone(),
             locked: locked_vec,
             sort: self.sort,
             mode: self.mode,
@@ -385,11 +381,7 @@ impl App {
                     AppAction::None
                 }
                 'm' => {
-                    self.mode = match self.mode {
-                        GameMode::Standard => GameMode::Event,
-                        GameMode::Event => GameMode::Standard,
-                        GameMode::Both => GameMode::Standard,
-                    };
+                    self.mode = self.mode.toggle();
                     self.clamp_selection();
                     AppAction::SaveConfig(self.to_config())
                 }
@@ -534,7 +526,6 @@ impl App {
             .filter(|r| match self.mode {
                 GameMode::Standard => r.mode == "Standard",
                 GameMode::Event => r.mode == "Event",
-                GameMode::Both => true,
             })
             .collect();
 
@@ -658,7 +649,6 @@ mod tests {
         App::new(
             SortOrder::Default,
             GameMode::Standard,
-            vec![],
             vec![],
             Language::En,
             None,
