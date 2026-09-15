@@ -16,13 +16,17 @@
     Download existing v0.6.x binaries, build .tar.gz/.zip archives with README & LICENSE,
     generate SHA256SUMS.txt, and upload them to GitHub Releases.
 
+.PARAMETER PruneAssets
+    Prune obsolete legacy assets (dbdqueue-* binaries, install.ps1, install.sh) from GitHub releases.
+
 .PARAMETER All
-    Execute both -DeleteLegacy and -RepackageV06.
+    Execute -DeleteLegacy, -RepackageV06, and -PruneAssets.
 
 .EXAMPLE
     .\scripts\cleanup-releases.ps1 -DryRun -All
     .\scripts\cleanup-releases.ps1 -DeleteLegacy
     .\scripts\cleanup-releases.ps1 -RepackageV06
+    .\scripts\cleanup-releases.ps1 -PruneAssets
 #>
 
 [CmdletBinding()]
@@ -30,6 +34,7 @@ param (
     [switch]$DryRun,
     [switch]$DeleteLegacy,
     [switch]$RepackageV06,
+    [switch]$PruneAssets,
     [switch]$All,
     [string]$Repo = "trazxdxne/dbdqueue"
 )
@@ -39,10 +44,11 @@ $ErrorActionPreference = 'Stop'
 if ($All) {
     $DeleteLegacy = $true
     $RepackageV06 = $true
+    $PruneAssets = $true
 }
 
-if (-not $DeleteLegacy -and -not $RepackageV06) {
-    Write-Host "No action specified. Run with -DeleteLegacy, -RepackageV06, or -All." -ForegroundColor Yellow
+if (-not $DeleteLegacy -and -not $RepackageV06 -and -not $PruneAssets) {
+    Write-Host "No action specified. Run with -DeleteLegacy, -RepackageV06, -PruneAssets, or -All." -ForegroundColor Yellow
     Write-Host "Use Get-Help .\scripts\cleanup-releases.ps1 -Detailed for help."
     exit 1
 }
@@ -199,6 +205,33 @@ if ($RepackageV06) {
         }
     } finally {
         Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# 3. Prune Obsolete Release Assets
+$obsoleteAssetNames = @(
+    "dbdqueue-linux-aarch64", "dbdqueue-linux-x86_64", "dbdqueue-windows-x64.exe",
+    "install.ps1", "install.sh"
+)
+
+if ($PruneAssets) {
+    Write-Host "`n----------------------------------------------------------------------" -ForegroundColor DarkGray
+    Write-Host "==> Pruning Obsolete Release Assets..." -ForegroundColor Cyan
+    Write-Host "----------------------------------------------------------------------" -ForegroundColor DarkGray
+
+    $allCheckTags = @($legacyTags) + @($v06Tags)
+    foreach ($tag in $allCheckTags) {
+        if ($DryRun) {
+            Write-Host "[DRY-RUN] Would inspect and prune obsolete assets for release: $tag" -ForegroundColor Yellow
+        } else {
+            $check = gh release view $tag --repo $Repo 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "Inspecting release $tag for obsolete assets..." -ForegroundColor Gray
+                foreach ($asset in $obsoleteAssetNames) {
+                    gh release delete-asset $tag $asset --repo $Repo --yes 2>$null
+                }
+            }
+        }
     }
 }
 

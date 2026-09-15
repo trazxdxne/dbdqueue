@@ -100,27 +100,41 @@ pub enum Direction {
 pub const SIMILAR_PING_TOLERANCE_MS: u32 = 25;
 pub const SIMILAR_TIME_TOLERANCE_SECS: u32 = 15;
 
-pub fn ping_penalty(ping: u32, is_killer: bool) -> u32 {
-    if is_killer {
-        match ping {
-            0..=70 => 0,
-            71..=100 => 15,
-            101..=140 => 95,
-            141..=180 => 130,
-            181..=220 => 190,
-            221..=250 => 270,
-            _ => 500u32.saturating_add(ping.saturating_sub(250).saturating_mul(4)),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Role {
+    Killer,
+    Survivor,
+}
+
+impl Role {
+    pub fn ping_penalty(self, ping: u32) -> u32 {
+        match self {
+            Role::Killer => match ping {
+                0..=70 => 0,
+                71..=100 => 15,
+                101..=140 => 95,
+                141..=180 => 130,
+                181..=220 => 190,
+                221..=250 => 270,
+                _ => 500u32.saturating_add(ping.saturating_sub(250).saturating_mul(4)),
+            },
+            Role::Survivor => match ping {
+                0..=60 => 0,
+                61..=90 => 20,
+                91..=120 => 70,
+                121..=150 => 120,
+                151..=180 => 180,
+                181..=220 => 260,
+                221..=250 => 360,
+                _ => 600u32.saturating_add(ping.saturating_sub(250).saturating_mul(5)),
+            },
         }
-    } else {
-        match ping {
-            0..=60 => 0,
-            61..=90 => 20,
-            91..=120 => 70,
-            121..=150 => 120,
-            151..=180 => 180,
-            181..=220 => 260,
-            221..=250 => 360,
-            _ => 600u32.saturating_add(ping.saturating_sub(250).saturating_mul(5)),
+    }
+
+    pub fn queue_time(self, row: &RegionQueueData) -> &str {
+        match self {
+            Role::Killer => &row.killer,
+            Role::Survivor => &row.survivor,
         }
     }
 }
@@ -135,7 +149,6 @@ pub struct BestPick<'a> {
 pub struct Summary<'a> {
     pub killer: Option<BestPick<'a>>,
     pub survivor: Option<BestPick<'a>>,
-    pub lowest_ping: Option<&'a RegionQueueData>,
 }
 
 pub struct App {
@@ -577,67 +590,62 @@ impl App {
             return Summary {
                 killer: None,
                 survivor: None,
-                lowest_ping: None,
             };
         }
 
-        let pick_best =
-            |get_time_str: fn(&RegionQueueData) -> &str, is_killer: bool| -> Option<BestPick<'_>> {
-                let mut valid_candidates: Vec<(&RegionQueueData, u32, u32, u32)> = Vec::new();
+        struct Candidate<'a> {
+            row: &'a RegionQueueData,
+            score: u32,
+            ping: u32,
+            secs: u32,
+        }
 
-                for &row in &eligible_rows {
-                    let secs = api::parse_time_to_seconds(get_time_str(row));
-                    if secs >= 999999 {
-                        continue;
-                    }
-                    let ping = get_ping(row)?;
-                    let penalty = ping_penalty(ping, is_killer);
-                    let score = secs.saturating_add(penalty);
-                    valid_candidates.push((row, score, ping, secs));
+        let pick_best = |role: Role| -> Option<BestPick<'_>> {
+            let mut valid_candidates: Vec<Candidate<'_>> = Vec::new();
+
+            for &row in &eligible_rows {
+                let secs = api::parse_time_to_seconds(role.queue_time(row));
+                if secs >= 999999 {
+                    continue;
                 }
+                let ping = get_ping(row)?;
+                let penalty = role.ping_penalty(ping);
+                let score = secs.saturating_add(penalty);
+                valid_candidates.push(Candidate {
+                    row,
+                    score,
+                    ping,
+                    secs,
+                });
+            }
 
-                if valid_candidates.is_empty() {
-                    return None;
-                }
+            if valid_candidates.is_empty() {
+                return None;
+            }
 
-                let best_tuple = valid_candidates
-                    .iter()
-                    .min_by_key(|(row, score, ping, secs)| (*score, *ping, *secs, &row.name))?;
+            let best = valid_candidates
+                .iter()
+                .min_by_key(|c| (c.score, c.ping, c.secs, &c.row.name))?;
 
-                let best_row = best_tuple.0;
-                let best_ping = best_tuple.2;
-                let best_secs = best_tuple.3;
-
-                let similar = valid_candidates
-                    .iter()
-                    .filter(|(r, _, ping, secs)| {
-                        r.name != best_row.name
-                            && ping.abs_diff(best_ping) <= SIMILAR_PING_TOLERANCE_MS
-                            && secs.abs_diff(best_secs) <= SIMILAR_TIME_TOLERANCE_SECS
-                    })
-                    .count();
-
-                Some(BestPick {
-                    row: best_row,
-                    similar,
+            let similar = valid_candidates
+                .iter()
+                .filter(|c| {
+                    c.row.name != best.row.name
+                        && c.ping.abs_diff(best.ping) <= SIMILAR_PING_TOLERANCE_MS
+                        && c.secs.abs_diff(best.secs) <= SIMILAR_TIME_TOLERANCE_SECS
                 })
-            };
+                .count();
 
-        let killer = pick_best(|r| &r.killer, true);
-        let survivor = pick_best(|r| &r.survivor, false);
+            Some(BestPick {
+                row: best.row,
+                similar,
+            })
+        };
 
-        let lowest_ping = eligible_rows
-            .iter()
-            .copied()
-            .filter_map(|row| get_ping(row).map(|ping| (ping, &row.name, row)))
-            .min_by_key(|&(ping, name, _)| (ping, name))
-            .map(|(_, _, row)| row);
+        let killer = pick_best(Role::Killer);
+        let survivor = pick_best(Role::Survivor);
 
-        Summary {
-            killer,
-            survivor,
-            lowest_ping,
-        }
+        Summary { killer, survivor }
     }
 }
 
@@ -1008,7 +1016,6 @@ mod tests {
         assert_eq!(killer_pick.row.name, "Dublin");
         // Only Frankfurt (50ms) is within SIMILAR_PING_TOLERANCE_MS (25ms) of Dublin (25ms)
         assert_eq!(killer_pick.similar, 1);
-        assert_eq!(summary.lowest_ping.unwrap().name, "Dublin");
     }
 
     #[test]
@@ -1097,7 +1104,6 @@ mod tests {
         let killer_pick = summary.killer.expect("killer pick should be present");
         assert_eq!(killer_pick.row.name, "Dublin");
         assert_eq!(killer_pick.similar, 0);
-        assert_eq!(summary.lowest_ping.unwrap().name, "Dublin");
     }
 
     #[test]
@@ -1284,7 +1290,6 @@ mod tests {
         let summary = app.summary();
         assert!(summary.killer.is_none());
         assert!(summary.survivor.is_none());
-        assert!(summary.lowest_ping.is_none());
     }
 
     #[test]
@@ -1314,6 +1319,27 @@ mod tests {
         let summary = app.summary();
         let killer_pick = summary.killer.expect("killer pick should be present");
         assert_eq!(killer_pick.row.name, "Dublin");
-        assert_eq!(summary.lowest_ping.unwrap().name, "Dublin");
+    }
+
+    #[test]
+    fn test_role_ping_penalty_and_queue_time() {
+        let row = RegionQueueData {
+            flag: "[DE]".to_string(),
+            name: "Frankfurt".to_string(),
+            mode: "Standard".to_string(),
+            survivor: "12s".to_string(),
+            killer: "5s".to_string(),
+        };
+
+        assert_eq!(Role::Killer.queue_time(&row), "5s");
+        assert_eq!(Role::Survivor.queue_time(&row), "12s");
+
+        assert_eq!(Role::Killer.ping_penalty(50), 0);
+        assert_eq!(Role::Killer.ping_penalty(80), 15);
+        assert_eq!(Role::Killer.ping_penalty(300), 700);
+
+        assert_eq!(Role::Survivor.ping_penalty(50), 0);
+        assert_eq!(Role::Survivor.ping_penalty(80), 20);
+        assert_eq!(Role::Survivor.ping_penalty(300), 850);
     }
 }

@@ -57,6 +57,21 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
         .split(popup_layout[1])[1]
 }
 
+pub fn center_horizontally(area: Rect, width: u16) -> Rect {
+    if area.width < width {
+        area
+    } else {
+        Layout::horizontal([Constraint::Length(width)])
+            .flex(Flex::Center)
+            .split(area)[0]
+    }
+}
+
+fn pad_right(s: &str, width: usize) -> String {
+    let pad = width.saturating_sub(s.chars().count());
+    format!("{}{}", s, " ".repeat(pad))
+}
+
 pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
     let active_sort_str = tr_sort(app.locale, app.sort);
     let mode_str = tr_mode(app.locale, app.mode);
@@ -400,13 +415,7 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    let centered_area = if area.width < TABLE_WIDTH {
-        area
-    } else {
-        Layout::horizontal([Constraint::Length(TABLE_WIDTH)])
-            .flex(Flex::Center)
-            .split(area)[0]
-    };
+    let centered_area = center_horizontally(area, TABLE_WIDTH);
 
     let summary_area = Rect {
         x: centered_area.x,
@@ -418,77 +427,79 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
     let summary = app.summary();
     let api_to_aws = api::get_api_to_aws();
 
-    let format_label = |key: TextKey| -> String {
-        let label_str = tr(app.locale, key);
-        let pad = SUMMARY_LABEL_WIDTH.saturating_sub(label_str.chars().count());
-        format!("{}{}", label_str, " ".repeat(pad))
+    let format_pick_line = |key: TextKey,
+                            pick: Option<&crate::app::BestPick<'_>>,
+                            role: crate::app::Role|
+     -> Line<'_> {
+        let label_span = Span::styled(
+            pad_right(tr(app.locale, key), SUMMARY_LABEL_WIDTH),
+            Style::default().fg(Color::DarkGray),
+        );
+        if let Some(best) = pick {
+            let time_str = role.queue_time(best.row);
+            let time_color = color_for_time(time_str);
+            let time_span = Span::styled(
+                pad_right(time_str, SUMMARY_TIME_WIDTH),
+                Style::default().fg(time_color),
+            );
+
+            let reg_str = if best.row.flag.is_empty() {
+                best.row.name.clone()
+            } else {
+                format!("{} {}", best.row.flag, best.row.name)
+            };
+            let aws_code = api_to_aws.get(best.row.name.as_str()).unwrap_or(&"");
+            let is_locked = app.locked.contains(*aws_code);
+            let name_style = if is_locked {
+                Style::default()
+                    .fg(Color::LightRed)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().add_modifier(Modifier::BOLD)
+            };
+            let name_span = Span::styled(pad_right(&reg_str, SUMMARY_REGION_WIDTH), name_style);
+
+            let ping = app.pings.get(*aws_code).copied();
+            let (ping_text, ping_color) = if let Some(ms) = ping {
+                (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
+            } else {
+                ("—".to_string(), Color::DarkGray)
+            };
+            let ping_span = Span::styled(
+                pad_right(&ping_text, SUMMARY_PING_WIDTH),
+                Style::default().fg(ping_color),
+            );
+
+            let mut spans = vec![label_span, time_span, name_span, ping_span];
+
+            if best.similar > 0 {
+                let sim_str = format!(
+                    "+{} {}",
+                    best.similar,
+                    tr(app.locale, TextKey::SummarySimilar)
+                );
+                spans.push(Span::styled(sim_str, Style::default().fg(Color::DarkGray)));
+            }
+
+            Line::from(spans)
+        } else {
+            Line::from(vec![
+                label_span,
+                Span::styled("—", Style::default().fg(Color::DarkGray)),
+            ])
+        }
     };
 
-    let format_pick_line =
-        |key: TextKey, pick: Option<&crate::app::BestPick<'_>>, is_killer: bool| -> Line<'_> {
-            let label_span = Span::styled(format_label(key), Style::default().fg(Color::DarkGray));
-            if let Some(best) = pick {
-                let time_str = if is_killer {
-                    &best.row.killer
-                } else {
-                    &best.row.survivor
-                };
-                let time_color = color_for_time(time_str);
-                let time_pad = SUMMARY_TIME_WIDTH.saturating_sub(time_str.chars().count());
-                let padded_time = format!("{}{}", time_str, " ".repeat(time_pad));
-                let time_span = Span::styled(padded_time, Style::default().fg(time_color));
-
-                let reg_str = if best.row.flag.is_empty() {
-                    best.row.name.clone()
-                } else {
-                    format!("{} {}", best.row.flag, best.row.name)
-                };
-                let aws_code = api_to_aws.get(best.row.name.as_str()).unwrap_or(&"");
-                let is_locked = app.locked.contains(*aws_code);
-                let name_style = if is_locked {
-                    Style::default()
-                        .fg(Color::LightRed)
-                        .add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().add_modifier(Modifier::BOLD)
-                };
-                let reg_pad = SUMMARY_REGION_WIDTH.saturating_sub(reg_str.chars().count());
-                let padded_reg = format!("{}{}", reg_str, " ".repeat(reg_pad));
-                let name_span = Span::styled(padded_reg, name_style);
-
-                let ping = app.pings.get(*aws_code).copied();
-                let (ping_text, ping_color) = if let Some(ms) = ping {
-                    (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
-                } else {
-                    ("—".to_string(), Color::DarkGray)
-                };
-                let ping_pad = SUMMARY_PING_WIDTH.saturating_sub(ping_text.chars().count());
-                let padded_ping = format!("{}{}", ping_text, " ".repeat(ping_pad));
-                let ping_span = Span::styled(padded_ping, Style::default().fg(ping_color));
-
-                let mut spans = vec![label_span, time_span, name_span, ping_span];
-
-                if best.similar > 0 {
-                    let sim_str = format!(
-                        "+{} {}",
-                        best.similar,
-                        tr(app.locale, TextKey::SummarySimilar)
-                    );
-                    spans.push(Span::styled(sim_str, Style::default().fg(Color::DarkGray)));
-                }
-
-                Line::from(spans)
-            } else {
-                Line::from(vec![
-                    label_span,
-                    Span::styled("—", Style::default().fg(Color::DarkGray)),
-                ])
-            }
-        };
-
-    let killer_line = format_pick_line(TextKey::SummaryKiller, summary.killer.as_ref(), true);
-    let survivor_line =
-        format_pick_line(TextKey::SummarySurvivor, summary.survivor.as_ref(), false);
+    let killer_line = format_pick_line(
+        TextKey::SummaryKiller,
+        summary.killer.as_ref(),
+        crate::app::Role::Killer,
+    );
+    let survivor_line = format_pick_line(
+        TextKey::SummarySurvivor,
+        summary.survivor.as_ref(),
+        crate::app::Role::Survivor,
+    );
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -531,13 +542,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         ])
         .split(f.area());
 
-    let table_area = if chunks[1].width < TABLE_WIDTH {
-        chunks[1]
-    } else {
-        Layout::horizontal([Constraint::Length(TABLE_WIDTH)])
-            .flex(Flex::Center)
-            .split(chunks[1])[0]
-    };
+    let table_area = center_horizontally(chunks[1], TABLE_WIDTH);
 
     draw_header(f, app, chunks[0]);
     draw_table(f, app, table_area);

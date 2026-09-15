@@ -11,7 +11,9 @@
 #   --repackage-v06       Download existing v0.6.x release binaries, create .tar.gz/.zip
 #                         archives with README & LICENSE, generate SHA256SUMS.txt,
 #                         and upload them.
-#   --all                 Run both --delete-legacy and --repackage-v06.
+#   --prune-assets        Prune obsolete legacy assets (dbdqueue-* binaries, install.ps1,
+#                         install.sh) from releases.
+#   --all                 Run --delete-legacy, --repackage-v06, and --prune-assets.
 #   --help, -h            Show this help message.
 # ==============================================================================
 
@@ -21,6 +23,7 @@ REPO="${GITHUB_REPOSITORY:-trazxdxne/dbdqueue}"
 DRY_RUN=false
 DO_DELETE=false
 DO_REPACKAGE=false
+DO_PRUNE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -37,13 +40,18 @@ while [[ $# -gt 0 ]]; do
       DO_REPACKAGE=true
       shift
       ;;
+    --prune-assets)
+      DO_PRUNE=true
+      shift
+      ;;
     --all)
       DO_DELETE=true
       DO_REPACKAGE=true
+      DO_PRUNE=true
       shift
       ;;
     -h|--help)
-      sed -n '2,15p' "$0" | sed 's/^# \?//'
+      sed -n '2,17p' "$0" | sed 's/^# \?//'
       exit 0
       ;;
     *)
@@ -53,8 +61,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [ "$DO_DELETE" = false ] && [ "$DO_REPACKAGE" = false ]; then
-  echo "No action specified. Use --delete-legacy, --repackage-v06, or --all."
+if [ "$DO_DELETE" = false ] && [ "$DO_REPACKAGE" = false ] && [ "$DO_PRUNE" = false ]; then
+  echo "No action specified. Use --delete-legacy, --repackage-v06, --prune-assets, or --all."
   echo "Use --help for more information."
   exit 1
 fi
@@ -208,6 +216,38 @@ if [ "$DO_REPACKAGE" = true ]; then
     fi
 
     cd - >/dev/null
+  done
+fi
+
+# ------------------------------------------------------------------------------
+# 3. Prune Obsolete Release Assets
+# ------------------------------------------------------------------------------
+OBSOLETE_ASSET_NAMES=(
+  "dbdqueue-linux-aarch64"
+  "dbdqueue-linux-x86_64"
+  "dbdqueue-windows-x64.exe"
+  "install.ps1"
+  "install.sh"
+)
+
+if [ "$DO_PRUNE" = true ]; then
+  echo ""
+  echo "----------------------------------------------------------------------"
+  echo "==> Pruning Obsolete Release Assets..."
+  echo "----------------------------------------------------------------------"
+
+  ALL_CHECK_TAGS=("${LEGACY_TAGS[@]}" "${V06_TAGS[@]}")
+  for tag in "${ALL_CHECK_TAGS[@]}"; do
+    if [ "$DRY_RUN" = true ]; then
+      echo "[DRY-RUN] Would inspect and prune obsolete assets for release: $tag"
+    else
+      if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
+        echo "Inspecting release $tag for obsolete assets..."
+        for asset in "${OBSOLETE_ASSET_NAMES[@]}"; do
+          gh release delete-asset "$tag" "$asset" --repo "$REPO" --yes 2>/dev/null || true
+        done
+      fi
+    fi
   done
 fi
 

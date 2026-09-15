@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -55,6 +59,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
+          # Note: Stage standalone binaries (consumed by install.ps1 / install.sh) as well as archives
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
             cp target/${{ matrix.target }}/release/dbdq.exe dist/${{ matrix.output_name }}
             cp target/${{ matrix.target }}/release/dbdq.exe dbdq.exe
