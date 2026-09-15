@@ -6,10 +6,18 @@ on:
   pull_request:
     branches: [ master, main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/master' && github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
 jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout source code
         uses: actions/checkout@v4
@@ -31,6 +39,7 @@ jobs:
   test:
     name: Test - ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       matrix:
         os: [ ubuntu-latest, windows-latest ]
