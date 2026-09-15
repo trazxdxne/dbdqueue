@@ -568,7 +568,6 @@ mod tests {
             SortOrder::Default,
             GameMode::Standard,
             vec![],
-            vec![],
             Language::En,
             None,
         );
@@ -629,7 +628,6 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
-            vec![],
             vec!["eu-central-1".to_string()],
             Language::En,
             None,
@@ -682,7 +680,6 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
-            vec![],
             vec!["eu-central-1".to_string()],
             Language::Ru,
             None,
@@ -767,7 +764,6 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
-            vec![],
             vec!["eu-central-1".to_string()],
             Language::En,
             None,

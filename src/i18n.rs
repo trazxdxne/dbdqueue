@@ -221,12 +221,10 @@ pub fn tr_mode(locale: Locale, mode: GameMode) -> &'static str {
         Locale::En => match mode {
             GameMode::Standard => "Standard",
             GameMode::Event => "Event",
-            GameMode::Both => "Both",
         },
         Locale::Ru => match mode {
             GameMode::Standard => "Обычный",
             GameMode::Event => "Ивент",
-            GameMode::Both => "Оба",
         },
     }
 }

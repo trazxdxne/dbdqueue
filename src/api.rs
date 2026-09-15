@@ -298,6 +298,103 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
     Ok((data, api_data.lastupdated2))
 }
 
+pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
+    let raw_str = words_list.join(" ");
+    let mut parts = Vec::new();
+    for p in raw_str.split(',') {
+        let p_clean = p.trim();
+        if !p_clean.is_empty() {
+            parts.push(p_clean.to_string());
+        }
+    }
+
+    let mut normalized_map = HashMap::new();
+    normalized_map.insert("sao paulo", "São Paulo");
+    normalized_map.insert("sao_paulo", "São Paulo");
+    normalized_map.insert("saopaulo", "São Paulo");
+    normalized_map.insert("hong kong", "Hong Kong");
+    normalized_map.insert("hong_kong", "Hong Kong");
+    normalized_map.insert("hongkong", "Hong Kong");
+    normalized_map.insert("montreal", "Montréal");
+
+    let api_to_aws = get_api_to_aws();
+    let aws_to_api = get_aws_to_api();
+
+    let mut resolved = Vec::new();
+
+    for part in parts {
+        let part_lower = part.to_lowercase();
+
+        if let Some(norm) = normalized_map.get(part_lower.as_str()) {
+            resolved.push(norm.to_string());
+            continue;
+        }
+
+        if let Some(api_name) = aws_to_api.get(part_lower.as_str()) {
+            resolved.push(api_name.to_string());
+            continue;
+        }
+
+        let mut chars = part_lower.chars();
+        let part_cap = match chars.next() {
+            None => String::new(),
+            Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
+        };
+
+        if api_to_aws.contains_key(part_cap.as_str()) {
+            resolved.push(part_cap);
+            continue;
+        }
+
+        let words: Vec<&str> = part.split_whitespace().collect();
+        let mut i = 0;
+        while i < words.len() {
+            let word = words[i].to_lowercase();
+            if i + 1 < words.len() {
+                let two_words = format!("{} {}", word, words[i + 1].to_lowercase());
+                if let Some(norm) = normalized_map.get(two_words.as_str()) {
+                    resolved.push(norm.to_string());
+                    i += 2;
+                    continue;
+                }
+            }
+
+            if let Some(norm) = normalized_map.get(word.as_str()) {
+                resolved.push(norm.to_string());
+            } else if let Some(api_name) = aws_to_api.get(word.as_str()) {
+                resolved.push(api_name.to_string());
+            } else {
+                let mut c_chars = word.chars();
+                let word_cap = match c_chars.next() {
+                    None => String::new(),
+                    Some(f) => f.to_uppercase().collect::<String>() + c_chars.as_str(),
+                };
+                if api_to_aws.contains_key(word_cap.as_str()) {
+                    resolved.push(word_cap);
+                }
+            }
+            i += 1;
+        }
+    }
+
+    resolved
+}
+
+pub fn resolve_to_aws_codes(words_list: &[String]) -> Vec<String> {
+    let mut resolved = Vec::new();
+    let api_to_aws = get_api_to_aws();
+    let all_aws = get_all_aws_regions();
+    let names = resolve_region_names(words_list);
+    for r in names {
+        if let Some(aws_code) = api_to_aws.get(r.as_str()) {
+            resolved.push(aws_code.to_string());
+        } else if all_aws.contains(&r.as_str()) {
+            resolved.push(r);
+        }
+    }
+    resolved
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,5 +491,27 @@ mod tests {
         let disabled = get_disabled_aws_regions(&queues);
         assert!(disabled.contains("eu-west-2"));
         assert!(!disabled.contains("eu-central-1"));
+    }
+
+    #[test]
+    fn test_resolve_region_names() {
+        let input1 = vec!["Frankfurt,Dublin".to_string()];
+        let parsed1 = resolve_region_names(&input1);
+        assert_eq!(parsed1, vec!["Frankfurt", "Dublin"]);
+
+        let input2 = vec!["sao paulo, montreal, virginia".to_string()];
+        let parsed2 = resolve_region_names(&input2);
+        assert_eq!(parsed2, vec!["São Paulo", "Montréal", "Virginia"]);
+
+        let input3 = vec!["us-east-1".to_string(), "eu-central-1".to_string()];
+        let parsed3 = resolve_region_names(&input3);
+        assert_eq!(parsed3, vec!["Virginia", "Frankfurt"]);
+    }
+
+    #[test]
+    fn test_resolve_to_aws_codes() {
+        let input = vec!["Frankfurt".to_string(), "sao paulo".to_string(), "us-east-1".to_string()];
+        let codes = resolve_to_aws_codes(&input);
+        assert_eq!(codes, vec!["eu-central-1", "sa-east-1", "us-east-1"]);
     }
 }

@@ -537,36 +537,6 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     run_interactive_menu(title, &options, current_locked, instructions)
 }
 
-pub fn interactive_priority_menu(current_priority: &[String]) -> Option<Vec<String>> {
-    let queues = crate::api::fetch_queue_times()
-        .map(|(q, _)| q)
-        .unwrap_or_default();
-    let disabled = crate::api::get_disabled_aws_regions(&queues);
-    let api_to_aws = crate::api::get_api_to_aws();
-    let mut regions: Vec<String> = api_to_aws
-        .iter()
-        .filter(|(_, code)| !disabled.contains(**code))
-        .map(|(name, _)| name.to_string())
-        .collect();
-    regions.sort();
-
-    let options: Vec<(String, String)> = regions.iter().map(|r| (r.clone(), r.clone())).collect();
-
-    let is_ru = is_russian();
-    let title = if is_ru {
-        "Приоритетные регионы"
-    } else {
-        "Priority Regions"
-    };
-    let instructions = if is_ru {
-        "\x1b[91m[↑↓]\x1b[0m Выбор  \x1b[91m[Пробел]\x1b[0m Вкл/Выкл  \x1b[91m[Enter]\x1b[0m Сохранить  \x1b[91m[Esc]\x1b[0m Отмена"
-    } else {
-        "\x1b[91m[↑↓]\x1b[0m Select  \x1b[91m[Space]\x1b[0m Toggle  \x1b[91m[Enter]\x1b[0m Save  \x1b[91m[Esc]\x1b[0m Cancel"
-    };
-
-    run_interactive_menu(title, &options, current_priority, instructions)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

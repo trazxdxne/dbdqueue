@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-09-15
+
+### Changed
+- Refactored `GameMode` into a cohesive binary state (`Standard` / `Event`) with dedicated `toggle()` method; existing configs with `mode = "both"` deserialize into `GameMode::Standard` for backwards compatibility.
+- Deepened region resolution module into `api.rs` (`resolve_region_names` and `resolve_to_aws_codes`), eliminating raw string parsing and lookups in `main.rs`.
+
+### Removed
+- Removed deprecated `GameMode::Both` variant and `--mode both` CLI option.
+- Removed legacy `priority` feature: `--priority` CLI flag, `config.priority` field, and `interactive_priority_menu()` from `hosts.rs`. Existing config files containing `priority` continue loading without error.
+
 ## [0.6.3] - 2026-09-15
 
 ### Added
