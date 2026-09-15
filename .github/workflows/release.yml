@@ -17,14 +17,17 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             output_name: dbdq-linux-x86_64
+            archive_name: dbdq-linux-x86_64.tar.gz
             os: ubuntu-latest
             use_cross: false
           - target: aarch64-unknown-linux-gnu
             output_name: dbdq-linux-aarch64
+            archive_name: dbdq-linux-aarch64.tar.gz
             os: ubuntu-latest
             use_cross: true
           - target: x86_64-pc-windows-msvc
             output_name: dbdq-windows-x64.exe
+            archive_name: dbdq-windows-x64.zip
             os: windows-latest
             use_cross: false
 
@@ -47,23 +50,28 @@ jobs:
         shell: bash
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Prepare asset
+      - name: Package release assets
         shell: bash
         run: |
+          mkdir -p dist
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            cp target/${{ matrix.target }}/release/dbdq.exe ${{ matrix.output_name }}
+            cp target/${{ matrix.target }}/release/dbdq.exe dist/${{ matrix.output_name }}
+            cp target/${{ matrix.target }}/release/dbdq.exe dbdq.exe
+            7z a -tzip dist/${{ matrix.archive_name }} dbdq.exe README.md LICENSE
           else
-            cp target/${{ matrix.target }}/release/dbdq ${{ matrix.output_name }}
+            cp target/${{ matrix.target }}/release/dbdq dist/${{ matrix.output_name }}
+            cp target/${{ matrix.target }}/release/dbdq dbdq
+            tar -czvf dist/${{ matrix.archive_name }} dbdq README.md LICENSE
           fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.output_name }}
-          path: ${{ matrix.output_name }}
+          name: assets-${{ matrix.target }}
+          path: dist/*
 
   release:
-    name: Create GitHub Release
+    name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -73,22 +81,34 @@ jobs:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
         with:
-          path: artifacts
+          pattern: assets-*
+          path: release-assets
+          merge-multiple: true
 
-      - name: Move artifacts to root
+      - name: Generate Checksums
         run: |
-          mv artifacts/dbdq-linux-x86_64/dbdq-linux-x86_64 .
-          mv artifacts/dbdq-linux-aarch64/dbdq-linux-aarch64 .
-          mv artifacts/dbdq-windows-x64.exe/dbdq-windows-x64.exe .
+          cd release-assets
+          sha256sum dbdq* > SHA256SUMS.txt
+          echo "Generated SHA256 Checksums:"
+          cat SHA256SUMS.txt
 
       - name: Extract Release Notes
         id: changelog
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "## Dead By Queue v$VERSION" > release_notes.md
-          awk -v ver="$VERSION" '/^## \[/ { if ($0 ~ "^## \\[" ver "\\]") flag=1; else flag=0; next } flag' CHANGELOG.md >> release_notes.md
+          echo "" >> release_notes.md
+          awk -v ver="$VERSION" '
+            $0 ~ "^## \\[" ver "\\]" { flag=1; next }
+            /^## \[/ { flag=0 }
+            flag { print }
+          ' CHANGELOG.md >> release_notes.md
 
-      - name: Clean up obsolete release assets
+          if [ ! -s release_notes.md ] || [ $(wc -l < release_notes.md) -le 2 ]; then
+            echo "Release v$VERSION" >> release_notes.md
+          fi
+
+      - name: Clean up obsolete legacy release assets
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
           echo "Cleaning obsolete assets for $TAG..."
@@ -98,13 +118,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create Release
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dbdq-linux-x86_64
-            dbdq-linux-aarch64
-            dbdq-windows-x64.exe
+            release-assets/*
           body_path: release_notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
