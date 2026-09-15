@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-09-15
+
+### Added
+- Scalable vector graphics dashboard mockup (`assets/dashboard.svg`).
+- Cross-platform release cleanup scripts (`scripts/cleanup-releases.ps1`, `scripts/cleanup-releases.sh`) to prune obsolete binary assets from GitHub releases.
+- Open-source project LICENSE file.
+
+### Changed
+- Upgraded multi-platform release workflow (`release.yml`) with automated SHA256 checksum generation, changelog extraction, and legacy asset cleanup.
+- Hardened CI (`ci.yml`) and Release (`release.yml`) workflows with concurrency control, least-privilege permissions, and execution timeouts.
+- Overhauled README documentation with architecture details, latency formulas, badges, and project navigation.
+
 ## [0.6.2] - 2026-09-05
 
 ### Changed
