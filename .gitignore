@@ -5,3 +5,8 @@ test_config_*.toml
 test_hosts_*
 config.json
 *.tmp
+
+# Defensive agent/skill generator ignores
+.agents/
+_agents/
+skills-lock.json

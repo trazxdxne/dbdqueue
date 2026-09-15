@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 540" width="100%" height="100%">
+  <defs>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e1e2e"/>
+      <stop offset="100%" stop-color="#181825"/>
+    </linearGradient>
+    <style>
+      .mono { font-family: 'JetBrains Mono', 'Cascadia Code', 'SF Mono', 'Fira Code', Menlo, Consolas, monospace; }
+      .bold { font-weight: 700; }
+      .red-accent { fill: #f38ba8; }
+      .green-accent { fill: #a6e3a1; }
+      .yellow-accent { fill: #f9e2af; }
+      .red-status { fill: #eba0ac; }
+      .text-light { fill: #cdd6f4; }
+      .text-muted { fill: #6c7086; }
+      .text-dim { fill: #9399b2; }
+      .border-red { stroke: #f38ba8; stroke-width: 1.2; fill: none; }
+      .border-gray { stroke: #45475a; stroke-width: 1.2; fill: none; }
+    </style>
+  </defs>
+
+  <!-- Window Container with drop shadow -->
+  <rect x="20" y="16" width="840" height="508" rx="10" ry="10" fill="url(#bgGrad)" filter="url(#shadow)"/>
+  <rect x="20" y="16" width="840" height="508" rx="10" ry="10" stroke="#313244" stroke-width="1" fill="none"/>
+
+  <!-- Window Titlebar -->
+  <rect x="20" y="16" width="840" height="38" rx="10" ry="10" fill="#11111b"/>
+  <rect x="20" y="44" width="840" height="10" fill="#11111b"/>
+  <line x1="20" y1="54" x2="860" y2="54" stroke="#313244" stroke-width="1"/>
+
+  <!-- Window Controls -->
+  <circle cx="42" cy="35" r="6" fill="#ff5f56"/>
+  <circle cx="62" cy="35" r="6" fill="#ffbd2e"/>
+  <circle cx="82" cy="35" r="6" fill="#27c93f"/>
+
+  <!-- Title -->
+  <text x="440" y="39" class="mono text-muted" font-size="12" text-anchor="middle" letter-spacing="0.5">dbdq — Dead By Queue (v0.6.2)</text>
+
+  <!-- TOP HEADER BLOCK -->
+  <!-- Box border -->
+  <rect x="42" y="70" width="796" height="42" rx="4" class="border-red"/>
+  <!-- Box Title Cutout -->
+  <rect x="58" y="64" width="138" height="12" fill="#1e1e2e"/>
+  <text x="62" y="74" class="mono bold red-accent" font-size="12"> Dead By Queue </text>
+
+  <!-- Header Content -->
+  <text x="62" y="96" class="mono text-muted" font-size="13">Sort: <tspan class="bold text-light">Killer</tspan><tspan class="text-muted">  │  </tspan>Mode: <tspan class="bold text-light">Standard</tspan><tspan class="text-muted">  │  </tspan>Lock: <tspan class="bold green-accent">None</tspan></text>
+
+  <!-- MAIN TABLE BLOCK -->
+  <rect x="42" y="126" width="796" height="236" rx="4" class="border-gray"/>
+
+  <!-- Column Headers -->
+  <text x="66" y="152" class="mono bold text-light" font-size="13">Region</text>
+  <text x="320" y="152" class="mono bold text-light" font-size="13">Ping</text>
+  <text x="480" y="152" class="mono bold text-light" font-size="13">Survivor</text>
+  <text x="660" y="152" class="mono bold text-light" font-size="13">Killer</text>
+
+  <line x1="56" y1="164" x2="824" y2="164" stroke="#313244" stroke-width="1"/>
+
+  <!-- Row 1: Selected Row Highlight -->
+  <rect x="54" y="171" width="772" height="22" rx="3" fill="#313244" opacity="0.6"/>
+  <text x="66" y="187" class="mono bold text-light" font-size="13">🇩🇪 Frankfurt</text>
+  <text x="320" y="187" class="mono bold green-accent" font-size="13">28 ms</text>
+  <text x="480" y="187" class="mono green-accent" font-size="13">0:42</text>
+  <text x="660" y="187" class="mono bold green-accent" font-size="13">0:18</text>
+
+  <!-- Row 2 -->
+  <text x="66" y="211" class="mono text-light" font-size="13">🇮🇪 Dublin</text>
+  <text x="320" y="211" class="mono green-accent" font-size="13">34 ms</text>
+  <text x="480" y="211" class="mono yellow-accent" font-size="13">1:15</text>
+  <text x="660" y="211" class="mono green-accent" font-size="13">0:24</text>
+
+  <!-- Row 3 -->
+  <text x="66" y="235" class="mono text-light" font-size="13">🇬🇧 London</text>
+  <text x="320" y="235" class="mono green-accent" font-size="13">36 ms</text>
+  <text x="480" y="235" class="mono green-accent" font-size="13">0:55</text>
+  <text x="660" y="235" class="mono green-accent" font-size="13">0:31</text>
+
+  <!-- Row 4 -->
+  <text x="66" y="259" class="mono text-light" font-size="13">🇺🇸 N. Virginia</text>
+  <text x="320" y="259" class="mono yellow-accent" font-size="13">98 ms</text>
+  <text x="480" y="259" class="mono yellow-accent" font-size="13">2:10</text>
+  <text x="660" y="259" class="mono yellow-accent" font-size="13">1:05</text>
+
+  <!-- Row 5 -->
+  <text x="66" y="283" class="mono text-light" font-size="13">🇺🇸 Oregon</text>
+  <text x="320" y="283" class="mono red-status" font-size="13">142 ms</text>
+  <text x="480" y="283" class="mono red-status" font-size="13">3:45</text>
+  <text x="660" y="283" class="mono yellow-accent" font-size="13">1:20</text>
+
+  <!-- Row 6 -->
+  <text x="66" y="307" class="mono text-light" font-size="13">🇧🇷 São Paulo</text>
+  <text x="320" y="307" class="mono red-status" font-size="13">185 ms</text>
+  <text x="480" y="307" class="mono red-status" font-size="13">4:12</text>
+  <text x="660" y="307" class="mono yellow-accent" font-size="13">2:50</text>
+
+  <!-- Row 7 -->
+  <text x="66" y="331" class="mono text-light" font-size="13">🇯🇵 Tokyo</text>
+  <text x="320" y="331" class="mono red-status" font-size="13">210 ms</text>
+  <text x="480" y="331" class="mono red-status" font-size="13">5:30</text>
+  <text x="660" y="331" class="mono red-status" font-size="13">4:15</text>
+
+  <!-- SUMMARY PANEL ("Best pick now") -->
+  <rect x="42" y="376" width="796" height="74" rx="4" class="border-gray"/>
+  <rect x="58" y="370" width="124" height="12" fill="#181825"/>
+  <text x="62" y="380" class="mono bold text-light" font-size="12"> Best pick now </text>
+
+  <!-- Summary Rows (Killer & Survivor) -->
+  <text x="66" y="405" class="mono text-muted" font-size="13">Killer:     <tspan class="bold green-accent">0:18</tspan>    <tspan class="bold text-light">🇩🇪 Frankfurt</tspan>         <tspan class="green-accent">28 ms</tspan>    <tspan class="text-muted">+1 similar</tspan></text>
+  <text x="66" y="432" class="mono text-muted" font-size="13">Survivor:   <tspan class="bold green-accent">0:42</tspan>    <tspan class="bold text-light">🇩🇪 Frankfurt</tspan>         <tspan class="green-accent">28 ms</tspan></text>
+
+  <!-- FOOTER STATUS BAR -->
+  <text x="42" y="490" class="mono" font-size="12">
+    <tspan class="red-accent bold"> [↑↓] </tspan><tspan class="text-light">Select</tspan>
+    <tspan class="red-accent bold"> [L] </tspan><tspan class="text-light">Lock Region</tspan>
+    <tspan class="red-accent bold"> [S] </tspan><tspan class="text-light">Sort</tspan>
+    <tspan class="red-accent bold"> [M] </tspan><tspan class="text-light">Mode</tspan>
+    <tspan class="red-accent bold"> [R] </tspan><tspan class="text-light">Refresh</tspan>
+    <tspan class="red-accent bold"> [Esc] </tspan><tspan class="text-light">Quit</tspan>
+    <tspan class="text-muted"> │ </tspan>
+    <tspan class="text-muted">API Updated: 14s ago</tspan>
+  </text>
+</svg>

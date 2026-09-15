@@ -1,0 +1,48 @@
+MIT License
+
+Copyright (c) 2026 Dead By Queue Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+DISCLAIMER & LIMITATION OF LIABILITY
+--------------------------------------------------------------------------------
+
+1. INDEPENDENT COMMUNITY SOFTWARE
+Dead By Queue is an independent, open-source community utility. It is NOT
+affiliated with, endorsed by, sponsored by, or in any way associated with
+Behaviour Interactive Inc., Amazon Web Services, Inc. (AWS), Amazon.com, Inc.,
+or deadbyqueue.com.
+
+2. TRADEMARK NOTICE
+"Dead by Daylight" and related trademarks, service marks, logos, and designs are
+the registered trademarks and intellectual property of Behaviour Interactive Inc.
+"AWS", "Amazon Web Services", and related marks are trademarks of Amazon.com, Inc.
+or its affiliates. All other trademarks, trade names, or service marks referenced
+herein are the property of their respective owners and are used solely for
+identification and informational purposes.
+
+3. NETWORK & ROUTING NOTICE
+The region-locking functionality of Dead By Queue operates locally on the user's
+operating system by updating local name resolution (hosts file / firewall rules)
+to route selected matchmaking traffic. Users are solely responsible for compliance
+with any applicable terms of service, end user license agreements (EULAs), and
+network policies. Under no circumstances shall the authors or copyright holders
+be held liable for any account restrictions, network interruptions, loss of data,
+or incidental damages arising out of the use of or inability to use this software.
