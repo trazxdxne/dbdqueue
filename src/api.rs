@@ -510,7 +510,11 @@ mod tests {
 
     #[test]
     fn test_resolve_to_aws_codes() {
-        let input = vec!["Frankfurt".to_string(), "sao paulo".to_string(), "us-east-1".to_string()];
+        let input = vec![
+            "Frankfurt".to_string(),
+            "sao paulo".to_string(),
+            "us-east-1".to_string(),
+        ];
         let codes = resolve_to_aws_codes(&input);
         assert_eq!(codes, vec!["eu-central-1", "sa-east-1", "us-east-1"]);
     }
