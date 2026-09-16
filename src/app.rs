@@ -1,5 +1,5 @@
 use crate::api::{self, RegionQueueData};
-use crate::config::{AppConfig, GameMode, Language, SortOrder};
+use crate::config::{AppConfig, GameMode, Language, SortOrder, TimeFormat};
 use crate::i18n::{self, Locale};
 use ratatui::widgets::TableState;
 use std::collections::{HashMap, HashSet};
@@ -137,6 +137,19 @@ impl Role {
             Role::Survivor => &row.survivor,
         }
     }
+
+    pub fn queue_time_secs(self, row: &RegionQueueData) -> Option<u32> {
+        match self {
+            Role::Killer => row.killer_secs.or_else(|| {
+                let s = api::parse_time_to_seconds(&row.killer);
+                if s < 999999 { Some(s) } else { None }
+            }),
+            Role::Survivor => row.survivor_secs.or_else(|| {
+                let s = api::parse_time_to_seconds(&row.survivor);
+                if s < 999999 { Some(s) } else { None }
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -157,6 +170,7 @@ pub struct App {
     pub pings: HashMap<String, u32>,
     pub sort: SortOrder,
     pub mode: GameMode,
+    pub time_format: TimeFormat,
     pub locked: HashSet<String>,
     pub notice: Option<Notice>,
     pub should_quit: bool,
@@ -175,6 +189,7 @@ impl App {
     pub fn new(
         sort: SortOrder,
         mode: GameMode,
+        time_format: TimeFormat,
         locked: Vec<String>,
         lang: Language,
         api_url: Option<String>,
@@ -186,6 +201,7 @@ impl App {
             pings: HashMap::new(),
             sort,
             mode,
+            time_format,
             locked: locked.into_iter().collect(),
             notice: None,
             should_quit: false,
@@ -208,8 +224,16 @@ impl App {
             locked: locked_vec,
             sort: self.sort,
             mode: self.mode,
+            time_format: self.time_format,
             lang: self.lang,
             api_url: self.api_url.clone(),
+        }
+    }
+
+    pub fn toggle_time_format(&mut self) {
+        self.time_format = self.time_format.toggle();
+        for q in &mut self.queues {
+            q.reformat(self.time_format);
         }
     }
 
@@ -385,6 +409,10 @@ impl App {
                     self.clamp_selection();
                     AppAction::SaveConfig(self.to_config())
                 }
+                't' => {
+                    self.toggle_time_format();
+                    AppAction::SaveConfig(self.to_config())
+                }
                 'r' => {
                     if !self.is_fetching {
                         self.is_fetching = true;
@@ -473,7 +501,10 @@ impl App {
         self.is_fetching = false;
         self.pings = ping_res;
         match api_res {
-            Ok((queues, last_updated)) => {
+            Ok((mut queues, last_updated)) => {
+                for q in &mut queues {
+                    q.reformat(self.time_format);
+                }
                 let is_same = self.api_last_updated == last_updated && !self.queues.is_empty();
                 self.queues = queues;
                 self.api_last_updated = last_updated;
@@ -497,7 +528,10 @@ impl App {
 
     pub fn handle_api_update(&mut self, res: Result<(Vec<RegionQueueData>, i64), String>) {
         match res {
-            Ok((queues, last_updated)) => {
+            Ok((mut queues, last_updated)) => {
+                for q in &mut queues {
+                    q.reformat(self.time_format);
+                }
                 self.queues = queues;
                 self.api_last_updated = last_updated;
                 self.clamp_selection();
@@ -534,7 +568,7 @@ impl App {
                 filtered.sort_by_cached_key(|r| {
                     (
                         r.is_disabled(),
-                        api::parse_time_to_seconds(&r.survivor),
+                        Role::Survivor.queue_time_secs(r).unwrap_or(999999),
                         &r.name,
                     )
                 });
@@ -543,7 +577,7 @@ impl App {
                 filtered.sort_by_cached_key(|r| {
                     (
                         r.is_disabled(),
-                        api::parse_time_to_seconds(&r.killer),
+                        Role::Killer.queue_time_secs(r).unwrap_or(999999),
                         &r.name,
                     )
                 });
@@ -595,7 +629,9 @@ impl App {
             let mut valid_candidates: Vec<Candidate<'_>> = Vec::new();
 
             for &row in &eligible_rows {
-                let secs = api::parse_time_to_seconds(role.queue_time(row));
+                let Some(secs) = role.queue_time_secs(row) else {
+                    continue;
+                };
                 if secs >= 999999 {
                     continue;
                 }
@@ -649,6 +685,7 @@ mod tests {
         App::new(
             SortOrder::Default,
             GameMode::Standard,
+            TimeFormat::Exact,
             vec![],
             Language::En,
             None,
@@ -676,27 +713,9 @@ mod tests {
         let mut app = make_test_app();
         app.sort = SortOrder::Ping;
         app.queues = vec![
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Virginia".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[JP]".to_string(),
-                name: "Tokyo".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
+            RegionQueueData::new("[US]", "Virginia", "Standard", "5s", "10s"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "5s", "10s"),
+            RegionQueueData::new("[JP]", "Tokyo", "Standard", "5s", "10s"),
         ];
         // Frankfurt: 30ms, Virginia: 110ms, Tokyo: unmeasured
         app.pings.insert("eu-central-1".to_string(), 30);
@@ -725,20 +744,8 @@ mod tests {
     fn test_modal_regions_filter_disabled() {
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[GB]".to_string(),
-                name: "London".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "—".to_string(),
-                killer: "—".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "15s".to_string(),
-                killer: "30s".to_string(),
-            },
+            RegionQueueData::new("[GB]", "London", "Standard", "—", "—"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "15s", "30s"),
         ];
         let modal_regs = app.get_modal_regions();
         assert!(!modal_regs.contains(&"eu-west-2")); // London is disabled
@@ -750,27 +757,9 @@ mod tests {
         let mut app = make_test_app();
         app.sort = SortOrder::Ping;
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "—".to_string(),
-                killer: "—".to_string(),
-            },
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Virginia".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "15s".to_string(),
-                killer: "45s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "2m".to_string(),
-                killer: "1m".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "—", "—"),
+            RegionQueueData::new("[US]", "Virginia", "Standard", "15s", "45s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "2m", "1m"),
         ];
         app.pings.insert("eu-central-1".to_string(), 15); // Frankfurt (disabled)
         app.pings.insert("us-east-1".to_string(), 80); // Virginia (active)
@@ -817,6 +806,13 @@ mod tests {
             other => panic!("Expected SaveConfig, got {:?}", other),
         }
 
+        // Time format key returns SaveConfig
+        let action = app.handle_key('t');
+        match action {
+            AppAction::SaveConfig(cfg) => assert_eq!(cfg.time_format, TimeFormat::Rounded),
+            other => panic!("Expected SaveConfig, got {:?}", other),
+        }
+
         // Refresh key returns Refresh
         app.is_fetching = false;
         let action = app.handle_key('r');
@@ -832,6 +828,34 @@ mod tests {
         }
         // App's locked set is still empty until hosts result comes back
         assert!(app.locked.is_empty());
+    }
+
+    #[test]
+    fn test_handle_key_time_toggle_reformats_queues() {
+        let mut app = make_test_app();
+        app.queues = vec![RegionQueueData::new(
+            "[DE]",
+            "Frankfurt",
+            "Standard",
+            "294",
+            "1852",
+        )];
+        // Initially in Exact mode
+        app.queues[0].reformat(app.time_format);
+        assert_eq!(app.queues[0].survivor, "4:54");
+        assert_eq!(app.queues[0].killer, "30:52");
+
+        // Toggle to Rounded
+        app.handle_key('t');
+        assert_eq!(app.time_format, TimeFormat::Rounded);
+        assert_eq!(app.queues[0].survivor, "5m");
+        assert_eq!(app.queues[0].killer, "31m");
+
+        // Toggle back to Exact
+        app.handle_key('t');
+        assert_eq!(app.time_format, TimeFormat::Exact);
+        assert_eq!(app.queues[0].survivor, "4:54");
+        assert_eq!(app.queues[0].killer, "30:52");
     }
 
     #[test]
@@ -902,20 +926,8 @@ mod tests {
     fn test_selection_clamping() {
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Virginia".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
+            RegionQueueData::new("[US]", "Virginia", "Standard", "5s", "10s"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "5s", "10s"),
         ];
 
         app.table_state.select(Some(1));
@@ -937,20 +949,8 @@ mod tests {
     fn test_move_selection_wrap() {
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Virginia".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5s".to_string(),
-                killer: "10s".to_string(),
-            },
+            RegionQueueData::new("[US]", "Virginia", "Standard", "5s", "10s"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "5s", "10s"),
         ];
 
         app.table_state.select(Some(0));
@@ -966,34 +966,10 @@ mod tests {
         // (a) four regions tied at 6s killer with different pings → lowest ping wins, similar == 3;
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[GB]".to_string(),
-                name: "London".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Virginia".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "10s", "6s"),
+            RegionQueueData::new("[GB]", "London", "Standard", "10s", "6s"),
+            RegionQueueData::new("[US]", "Virginia", "Standard", "10s", "6s"),
         ];
         // Frankfurt: 50ms, Dublin: 25ms, London: 60ms, Virginia: 110ms
         app.pings.insert("eu-central-1".to_string(), 50);
@@ -1013,20 +989,8 @@ mod tests {
         // 6s region with 296 ms vs 9s region with 40 ms → the 9s region wins
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "9s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "10s", "9s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 296);
         app.pings.insert("eu-west-1".to_string(), 40);
@@ -1043,20 +1007,8 @@ mod tests {
         // 6s vs 30s → 6s wins even if 30s has lower ping (outside tolerance), similar == 0;
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "30s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "10s", "30s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 100);
         app.pings.insert("eu-west-1".to_string(), 20);
@@ -1072,20 +1024,8 @@ mod tests {
         // (d) a disabled row ("—"/"—") is ignored even with the lowest ping;
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "—".to_string(),
-                killer: "—".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "15s".to_string(),
-                killer: "15s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "—", "—"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "15s", "15s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 10);
         app.pings.insert("eu-west-1".to_string(), 50);
@@ -1101,20 +1041,8 @@ mod tests {
         // (e) region with no measured ping is excluded from Best pick candidates
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "10s", "6s"),
         ];
         // Only Frankfurt has a measured ping
         app.pings.insert("eu-central-1".to_string(), 40);
@@ -1130,20 +1058,8 @@ mod tests {
         // Tokyo 286ms @ 6s vs Frankfurt 150ms @ 1m (60s) -> Frankfurt must win
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[JP]".to_string(),
-                name: "Tokyo".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "6s".to_string(),
-                killer: "6s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "1m".to_string(),
-                killer: "1m".to_string(),
-            },
+            RegionQueueData::new("[JP]", "Tokyo", "Standard", "6s", "6s"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "1m", "1m"),
         ];
         app.pings.insert("ap-northeast-1".to_string(), 286);
         app.pings.insert("eu-central-1".to_string(), 150);
@@ -1160,20 +1076,8 @@ mod tests {
         // Duel 2: Frankfurt 80ms @ 5m (300s) vs Tokyo 220ms @ 10s -> 5m is too long, Tokyo wins
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "5m".to_string(),
-                killer: "5m".to_string(),
-            },
-            RegionQueueData {
-                flag: "[JP]".to_string(),
-                name: "Tokyo".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "10s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "5m", "5m"),
+            RegionQueueData::new("[JP]", "Tokyo", "Standard", "10s", "10s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 80);
         app.pings.insert("ap-northeast-1".to_string(), 220);
@@ -1192,20 +1096,8 @@ mod tests {
         // For Survivor: 160ms is painful (+180s penalty => 190s vs 150s => 60ms wins)
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "2m 30s".to_string(),
-                killer: "2m 30s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Virginia".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "10s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "2m 30s", "2m 30s"),
+            RegionQueueData::new("[US]", "Virginia", "Standard", "10s", "10s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 60);
         app.pings.insert("us-east-1".to_string(), 160);
@@ -1221,34 +1113,10 @@ mod tests {
     fn test_summary_similar_requires_both_ping_and_time() {
         let mut app = make_test_app();
         app.queues = vec![
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "10s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[GB]".to_string(),
-                name: "London".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "15s".to_string(),
-                killer: "15s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "12s".to_string(),
-                killer: "12s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[US]".to_string(),
-                name: "Ohio".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "40s".to_string(),
-                killer: "40s".to_string(),
-            },
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "10s", "10s"),
+            RegionQueueData::new("[GB]", "London", "Standard", "15s", "15s"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "12s", "12s"),
+            RegionQueueData::new("[US]", "Ohio", "Standard", "40s", "40s"),
         ];
         // Dublin: 25ms, 10s (winner)
         // London: 35ms, 15s (ping diff 10 <= 25, time diff 5 <= 15 => similar!)
@@ -1268,13 +1136,13 @@ mod tests {
     #[test]
     fn test_summary_all_unmeasured_returns_none() {
         let mut app = make_test_app();
-        app.queues = vec![RegionQueueData {
-            flag: "[DE]".to_string(),
-            name: "Frankfurt".to_string(),
-            mode: "Standard".to_string(),
-            survivor: "10s".to_string(),
-            killer: "10s".to_string(),
-        }];
+        app.queues = vec![RegionQueueData::new(
+            "[DE]",
+            "Frankfurt",
+            "Standard",
+            "10s",
+            "10s",
+        )];
         app.pings.clear();
 
         let summary = app.summary();
@@ -1288,20 +1156,8 @@ mod tests {
         let mut app = make_test_app();
         app.mode = GameMode::Standard;
         app.queues = vec![
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Event".to_string(),
-                survivor: "2s".to_string(),
-                killer: "2s".to_string(),
-            },
-            RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "15s".to_string(),
-                killer: "15s".to_string(),
-            },
+            RegionQueueData::new("[DE]", "Frankfurt", "Event", "2s", "2s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "15s", "15s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 10);
         app.pings.insert("eu-west-1".to_string(), 50);
@@ -1313,13 +1169,7 @@ mod tests {
 
     #[test]
     fn test_role_ping_penalty_and_queue_time() {
-        let row = RegionQueueData {
-            flag: "[DE]".to_string(),
-            name: "Frankfurt".to_string(),
-            mode: "Standard".to_string(),
-            survivor: "12s".to_string(),
-            killer: "5s".to_string(),
-        };
+        let row = RegionQueueData::new("[DE]", "Frankfurt", "Standard", "12s", "5s");
 
         assert_eq!(Role::Killer.queue_time(&row), "5s");
         assert_eq!(Role::Survivor.queue_time(&row), "12s");

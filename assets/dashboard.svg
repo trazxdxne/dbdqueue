@@ -47,7 +47,7 @@
   <text x="62" y="74" class="mono bold red-accent" font-size="12"> Dead By Queue </text>
 
   <!-- Header Content -->
-  <text x="62" y="96" class="mono text-muted" font-size="13">Sort: <tspan class="bold text-light">Killer</tspan><tspan class="text-muted">  │  </tspan>Mode: <tspan class="bold text-light">Standard</tspan><tspan class="text-muted">  │  </tspan>Lock: <tspan class="bold green-accent">None</tspan></text>
+  <text x="62" y="96" class="mono text-muted" font-size="13">Sort: <tspan class="bold text-light">Killer</tspan><tspan class="text-muted">  │  </tspan>Mode: <tspan class="bold text-light">Standard</tspan><tspan class="text-muted">  │  </tspan>Time: <tspan class="bold text-light">Exact</tspan><tspan class="text-muted">  │  </tspan>Lock: <tspan class="bold green-accent">None</tspan></text>
 
   <!-- MAIN TABLE BLOCK -->
   <rect x="42" y="126" width="796" height="236" rx="4" class="border-gray"/>
@@ -80,7 +80,7 @@
   <text x="660" y="235" class="mono green-accent" font-size="13">0:31</text>
 
   <!-- Row 4 -->
-  <text x="66" y="259" class="mono text-light" font-size="13">🇺🇸 N. Virginia</text>
+  <text x="66" y="259" class="mono text-light" font-size="13">🇺🇸 Virginia</text>
   <text x="320" y="259" class="mono yellow-accent" font-size="13">98 ms</text>
   <text x="480" y="259" class="mono yellow-accent" font-size="13">2:10</text>
   <text x="660" y="259" class="mono yellow-accent" font-size="13">1:05</text>
@@ -103,10 +103,10 @@
   <text x="480" y="331" class="mono red-status" font-size="13">5:30</text>
   <text x="660" y="331" class="mono red-status" font-size="13">4:15</text>
 
-  <!-- SUMMARY PANEL ("Best pick now") -->
+  <!-- SUMMARY PANEL ("Best Pick") -->
   <rect x="42" y="376" width="796" height="74" rx="4" class="border-gray"/>
-  <rect x="58" y="370" width="124" height="12" fill="#181825"/>
-  <text x="62" y="380" class="mono bold text-light" font-size="12"> Best pick now </text>
+  <rect x="58" y="370" width="84" height="12" fill="#181825"/>
+  <text x="62" y="380" class="mono bold text-light" font-size="12"> Best Pick </text>
 
   <!-- Summary Rows (Killer & Survivor) -->
   <text x="66" y="405" class="mono text-muted" font-size="13">Killer:     <tspan class="bold green-accent">0:18</tspan>    <tspan class="bold text-light">🇩🇪 Frankfurt</tspan>         <tspan class="green-accent">28 ms</tspan>    <tspan class="text-muted">+1 similar</tspan></text>
@@ -118,6 +118,7 @@
     <tspan class="red-accent bold"> [L] </tspan><tspan class="text-light">Lock Region</tspan>
     <tspan class="red-accent bold"> [S] </tspan><tspan class="text-light">Sort</tspan>
     <tspan class="red-accent bold"> [M] </tspan><tspan class="text-light">Mode</tspan>
+    <tspan class="red-accent bold"> [T] </tspan><tspan class="text-light">Time</tspan>
     <tspan class="red-accent bold"> [R] </tspan><tspan class="text-light">Refresh</tspan>
     <tspan class="red-accent bold"> [Esc] </tspan><tspan class="text-light">Quit</tspan>
     <tspan class="text-muted"> │ </tspan>

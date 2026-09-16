@@ -31,7 +31,7 @@ A fast, zero-dependency native terminal dashboard (TUI) for Dead by Daylight pla
 ### Real-Time Ratatui Terminal Interface
 - **Pure Native Performance**: Written entirely in Rust with `ratatui` and `crossterm`—no Node.js, Electron, or external runtime required.
 - **Adaptive Layout**: Automatically centers tables and guarantees that the **Best Pick** panel, header, and footer controls remain fully visible on standard $80 \times 24$ (and $\ge 14$) viewports with smooth table row scrolling.
-- **Intuitive Time Formatting**: Matchmaking durations are presented as `Xs` ($<60$s), `m:ss` ($1$:00 to $59$:59), and `1h+` / `2h+` ($\ge 1$h), stabilizing column alignment and eliminating cramped letter strings.
+- **Intuitive Time Formatting**: Toggle instantly between **Exact** (e.g. `0:53`, `4:54`, `1:52:31`) and **Rounded** (e.g. `53s`, `5m`, `2h`) modes with `[T]` to suit your preferred view.
 - **Accurate Refresh Timestamps**: Shows the exact age of source data from the API rather than just local poll times.
 
 ### Role-Aware Recommendation Engine ("Best Pick")
@@ -147,6 +147,7 @@ dbdq
 | `l` | Open **Region Locker** modal |
 | `s` | Cycle sorting mode (`Killer` → `Survivor` → `Ping`) |
 | `m` | Toggle game mode filter (`Standard` ↔ `Event`) |
+| `t` | Toggle queue time format (`Exact` ↔ `~Rounded`) |
 | `r` | Trigger immediate background data & ping refresh |
 | `Esc` | Close modal dialog or quit application |
 
@@ -163,6 +164,10 @@ dbdq --sort survivor
 # Filter by matchmaking mode
 dbdq --mode standard
 dbdq --mode event
+
+# Set queue duration display mode
+dbdq --time exact
+dbdq --time rounded
 
 # Lock to specific AWS regions (blocks all other matchmaking regions)
 dbdq lock frankfurt dublin
@@ -183,6 +188,7 @@ Settings are saved in TOML format:
 ```toml
 mode = "Standard"       # "Standard" or "Event"
 sort = "Killer"         # "Killer", "Survivor", "Ping", or "Default"
+time_format = "exact"   # "exact" or "rounded"
 locked = ["eu-central-1"] # Whitelisted AWS region codes
 lang = "auto"           # "auto", "en", or "ru"
 ```

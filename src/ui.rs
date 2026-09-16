@@ -1,6 +1,6 @@
 use crate::api;
 use crate::app::{App, NoticeKind, SPINNER_FRAMES};
-use crate::i18n::{TextKey, format_time_diff, tr, tr_mode, tr_sort};
+use crate::i18n::{TextKey, format_time_diff, tr, tr_mode, tr_sort, tr_time_format};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Flex, Layout, Rect},
@@ -99,6 +99,17 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(
             mode_str,
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            tr(app.locale, TextKey::TimeLabel),
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(
+            tr_time_format(app.locale, app.time_format),
             Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
@@ -302,6 +313,7 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     let lock_txt = tr(app.locale, TextKey::ActionLock);
     let sort_txt = tr(app.locale, TextKey::ActionSort);
     let mode_txt = tr(app.locale, TextKey::ActionMode);
+    let time_txt = tr(app.locale, TextKey::ActionTime);
     let refresh_txt = tr(app.locale, TextKey::ActionRefresh);
     let quit_txt = tr(app.locale, TextKey::ActionQuit);
 
@@ -314,6 +326,8 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
         Span::raw(sort_txt),
         Span::styled(" [M] ", Style::default().fg(Color::LightRed)),
         Span::raw(mode_txt),
+        Span::styled(" [T] ", Style::default().fg(Color::LightRed)),
+        Span::raw(time_txt),
         Span::styled(" [R] ", Style::default().fg(Color::LightRed)),
         Span::raw(refresh_txt),
         Span::styled(" [Esc] ", Style::default().fg(Color::LightRed)),
@@ -577,7 +591,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{GameMode, Language, SortOrder};
+    use crate::config::{GameMode, Language, SortOrder, TimeFormat};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
 
@@ -586,6 +600,7 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
+            TimeFormat::Exact,
             vec![],
             Language::En,
             None,
@@ -647,25 +662,14 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
+            TimeFormat::Exact,
             vec!["eu-central-1".to_string()],
             Language::En,
             None,
         );
         app.queues = vec![
-            api::RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            api::RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "12s".to_string(),
-                killer: "8s".to_string(),
-            },
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            api::RegionQueueData::new("[IE]", "Dublin", "Standard", "12s", "8s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 35);
         app.pings.insert("eu-west-1".to_string(), 45);
@@ -699,6 +703,7 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
+            TimeFormat::Exact,
             vec![],
             Language::En,
             None,
@@ -707,13 +712,9 @@ mod tests {
         let aws_to_api = api::get_aws_to_api();
         for &code in &all_aws {
             let name = aws_to_api.get(code).unwrap_or(&code);
-            app.queues.push(api::RegionQueueData {
-                flag: "".to_string(),
-                name: name.to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "15s".to_string(),
-            });
+            app.queues.push(api::RegionQueueData::new(
+                "", *name, "Standard", "10s", "15s",
+            ));
             app.pings.insert(code.to_string(), 40);
         }
         assert_eq!(app.queues.len(), 15);
@@ -745,25 +746,14 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
+            TimeFormat::Exact,
             vec!["eu-central-1".to_string()],
             Language::Ru,
             None,
         );
         app.queues = vec![
-            api::RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
-            api::RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "10s".to_string(),
-                killer: "6s".to_string(),
-            },
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            api::RegionQueueData::new("[IE]", "Dublin", "Standard", "10s", "6s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 35);
         app.pings.insert("eu-west-1".to_string(), 45);
@@ -829,25 +819,14 @@ mod tests {
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
+            TimeFormat::Exact,
             vec!["eu-central-1".to_string()],
             Language::En,
             None,
         );
         app.queues = vec![
-            api::RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "12s".to_string(),
-                killer: "6s".to_string(),
-            },
-            api::RegionQueueData {
-                flag: "[IE]".to_string(),
-                name: "Dublin".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "12s".to_string(),
-                killer: "6s".to_string(),
-            },
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "12s", "6s"),
+            api::RegionQueueData::new("[IE]", "Dublin", "Standard", "12s", "6s"),
         ];
         app.pings.insert("eu-central-1".to_string(), 62);
         app.pings.insert("eu-west-1".to_string(), 70);
@@ -926,6 +905,45 @@ mod tests {
         assert_eq!(
             ping_pos_1, ping_pos_2,
             "Ping column should align between Killer and Survivor"
+        );
+    }
+
+    #[test]
+    fn test_header_draws_time_format() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let l0: String = (0..80)
+            .map(|x| buffer[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            l0.contains("Time: ") && l0.contains("Exact"),
+            "Header must display 'Time: Exact', got: '{}'",
+            l0
+        );
+
+        // Toggle to rounded
+        app.toggle_time_format();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer2 = terminal.backend().buffer();
+        let l0_rounded: String = (0..80)
+            .map(|x| buffer2[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            l0_rounded.contains("Time: ") && l0_rounded.contains("~Rounded"),
+            "Header must display 'Time: ~Rounded', got: '{}'",
+            l0_rounded
         );
     }
 }

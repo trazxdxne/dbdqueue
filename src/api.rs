@@ -1,3 +1,4 @@
+use crate::config::TimeFormat;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
@@ -102,11 +103,63 @@ pub struct RegionQueueData {
     pub mode: String, // "Standard" or "Event"
     pub survivor: String,
     pub killer: String,
+    pub survivor_secs: Option<u32>,
+    pub killer_secs: Option<u32>,
 }
 
 impl RegionQueueData {
+    #[cfg(test)]
+    pub fn new(
+        flag: impl Into<String>,
+        name: impl Into<String>,
+        mode: impl Into<String>,
+        survivor: impl Into<String>,
+        killer: impl Into<String>,
+    ) -> Self {
+        let surv = survivor.into();
+        let kill = killer.into();
+        let surv_secs = if surv == "—" {
+            None
+        } else {
+            let s = parse_time_to_seconds(&surv);
+            if s < 999999 { Some(s) } else { None }
+        };
+        let kill_secs = if kill == "—" {
+            None
+        } else {
+            let k = parse_time_to_seconds(&kill);
+            if k < 999999 { Some(k) } else { None }
+        };
+        Self {
+            flag: flag.into(),
+            name: name.into(),
+            mode: mode.into(),
+            survivor: surv,
+            killer: kill,
+            survivor_secs: surv_secs,
+            killer_secs: kill_secs,
+        }
+    }
+
     pub fn is_disabled(&self) -> bool {
         self.survivor == "—" && self.killer == "—"
+    }
+
+    pub fn reformat(&mut self, format: TimeFormat) {
+        if self.survivor_secs.is_none() && self.survivor != "—" {
+            let s = parse_time_to_seconds(&self.survivor);
+            if s < 999999 {
+                self.survivor_secs = Some(s);
+            }
+        }
+        if self.killer_secs.is_none() && self.killer != "—" {
+            let k = parse_time_to_seconds(&self.killer);
+            if k < 999999 {
+                self.killer_secs = Some(k);
+            }
+        }
+        self.survivor = format_seconds_opt(self.survivor_secs, format);
+        self.killer = format_seconds_opt(self.killer_secs, format);
     }
 }
 
@@ -189,20 +242,50 @@ pub(crate) struct Api2Response {
     queues: HashMap<String, HashMap<String, QueueData>>,
 }
 
-pub fn format_seconds_to_time(seconds_str: &str) -> String {
-    if let Ok(sec) = seconds_str.parse::<u32>() {
-        if sec == 0 {
-            "—".to_string()
-        } else if sec < 60 {
-            format!("{}s", sec)
-        } else if sec < 3600 {
-            let m = sec / 60;
-            let s = sec % 60;
-            format!("{}:{:02}", m, s)
-        } else {
-            let h = sec / 3600;
-            format!("{}h+", h)
+pub fn format_seconds(sec: u32, format: TimeFormat) -> String {
+    if sec == 0 {
+        return "—".to_string();
+    }
+    match format {
+        TimeFormat::Exact => {
+            if sec < 3600 {
+                format!("{}:{:02}", sec / 60, sec % 60)
+            } else {
+                let h = sec / 3600;
+                let m = (sec % 3600) / 60;
+                let s = sec % 60;
+                format!("{h}:{m:02}:{s:02}")
+            }
         }
+        TimeFormat::Rounded => {
+            if sec < 60 {
+                format!("{}s", sec)
+            } else if sec < 3600 {
+                let mins = (sec + 30) / 60;
+                if mins >= 60 {
+                    "1h".to_string()
+                } else {
+                    format!("{}m", mins)
+                }
+            } else {
+                let hours = (sec + 1800) / 3600;
+                format!("{}h", hours.max(1))
+            }
+        }
+    }
+}
+
+pub fn format_seconds_opt(secs: Option<u32>, format: TimeFormat) -> String {
+    match secs {
+        Some(s) if s > 0 => format_seconds(s, format),
+        _ => "—".to_string(),
+    }
+}
+
+#[cfg(test)]
+pub fn format_seconds_to_time(seconds_str: &str, format: TimeFormat) -> String {
+    if let Ok(sec) = seconds_str.parse::<u32>() {
+        format_seconds(sec, format)
     } else {
         "—".to_string()
     }
@@ -296,21 +379,22 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
                 let name = aws_to_api.get(reg).unwrap_or(reg).to_string();
                 let flag = aws_to_flag.get(reg).unwrap_or(&"").to_string();
 
-                let (survivor, killer) = if let Some(q_data) = mode_queues.get(*reg) {
-                    let s_time = q_data
-                        .survivor
-                        .as_ref()
-                        .map(|t| format_seconds_to_time(&t.time))
-                        .unwrap_or_else(|| "—".to_string());
-                    let k_time = q_data
-                        .killer
-                        .as_ref()
-                        .map(|t| format_seconds_to_time(&t.time))
-                        .unwrap_or_else(|| "—".to_string());
-                    (s_time, k_time)
-                } else {
-                    ("—".to_string(), "—".to_string())
-                };
+                let (survivor, killer, survivor_secs, killer_secs) =
+                    if let Some(q_data) = mode_queues.get(*reg) {
+                        let s_sec = q_data
+                            .survivor
+                            .as_ref()
+                            .and_then(|t| t.time.parse::<u32>().ok());
+                        let k_sec = q_data
+                            .killer
+                            .as_ref()
+                            .and_then(|t| t.time.parse::<u32>().ok());
+                        let s_time = format_seconds_opt(s_sec, TimeFormat::Exact);
+                        let k_time = format_seconds_opt(k_sec, TimeFormat::Exact);
+                        (s_time, k_time, s_sec, k_sec)
+                    } else {
+                        ("—".to_string(), "—".to_string(), None, None)
+                    };
 
                 data.push(RegionQueueData {
                     flag,
@@ -318,6 +402,8 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
                     mode: mode_name.to_string(),
                     survivor,
                     killer,
+                    survivor_secs,
+                    killer_secs,
                 });
             }
         }
@@ -429,32 +515,95 @@ mod tests {
 
     #[test]
     fn test_parse_time() {
-        assert_eq!(parse_time_to_seconds("5s"), 5);
-        assert_eq!(parse_time_to_seconds("59s"), 59);
+        // Exact format
+        assert_eq!(parse_time_to_seconds("0:01"), 1);
+        assert_eq!(parse_time_to_seconds("0:53"), 53);
         assert_eq!(parse_time_to_seconds("1:00"), 60);
         assert_eq!(parse_time_to_seconds("3:27"), 207);
+        assert_eq!(parse_time_to_seconds("4:54"), 294);
+        assert_eq!(parse_time_to_seconds("30:52"), 1852);
         assert_eq!(parse_time_to_seconds("34:25"), 2065);
+        assert_eq!(parse_time_to_seconds("1:00:00"), 3600);
+        assert_eq!(parse_time_to_seconds("1:52:31"), 6751);
+
+        // Rounded format
+        assert_eq!(parse_time_to_seconds("1s"), 1);
+        assert_eq!(parse_time_to_seconds("53s"), 53);
+        assert_eq!(parse_time_to_seconds("59s"), 59);
+        assert_eq!(parse_time_to_seconds("1m"), 60);
+        assert_eq!(parse_time_to_seconds("5m"), 300);
+        assert_eq!(parse_time_to_seconds("31m"), 1860);
+        assert_eq!(parse_time_to_seconds("1h"), 3600);
+        assert_eq!(parse_time_to_seconds("2h"), 7200);
+
+        // Legacy formats
         assert_eq!(parse_time_to_seconds("1h+"), 3600);
         assert_eq!(parse_time_to_seconds("2h+"), 7200);
         assert_eq!(parse_time_to_seconds("3m"), 180);
         assert_eq!(parse_time_to_seconds("3m27s"), 207);
+
+        // Disabled / empty
         assert_eq!(parse_time_to_seconds("—"), 999999);
         assert_eq!(parse_time_to_seconds(""), 999999);
     }
 
     #[test]
-    fn test_format_seconds() {
-        assert_eq!(format_seconds_to_time("5"), "5s");
-        assert_eq!(format_seconds_to_time("59"), "59s");
-        assert_eq!(format_seconds_to_time("60"), "1:00");
-        assert_eq!(format_seconds_to_time("180"), "3:00");
-        assert_eq!(format_seconds_to_time("207"), "3:27");
-        assert_eq!(format_seconds_to_time("2065"), "34:25");
-        assert_eq!(format_seconds_to_time("3599"), "59:59");
-        assert_eq!(format_seconds_to_time("3600"), "1h+");
-        assert_eq!(format_seconds_to_time("7200"), "2h+");
-        assert_eq!(format_seconds_to_time("0"), "—");
-        assert_eq!(format_seconds_to_time("invalid"), "—");
+    fn test_format_seconds_exact() {
+        assert_eq!(format_seconds_to_time("0", TimeFormat::Exact), "—");
+        assert_eq!(format_seconds_to_time("1", TimeFormat::Exact), "0:01");
+        assert_eq!(format_seconds_to_time("53", TimeFormat::Exact), "0:53");
+        assert_eq!(format_seconds_to_time("60", TimeFormat::Exact), "1:00");
+        assert_eq!(format_seconds_to_time("180", TimeFormat::Exact), "3:00");
+        assert_eq!(format_seconds_to_time("207", TimeFormat::Exact), "3:27");
+        assert_eq!(format_seconds_to_time("294", TimeFormat::Exact), "4:54");
+        assert_eq!(format_seconds_to_time("1852", TimeFormat::Exact), "30:52");
+        assert_eq!(format_seconds_to_time("2065", TimeFormat::Exact), "34:25");
+        assert_eq!(format_seconds_to_time("3599", TimeFormat::Exact), "59:59");
+        assert_eq!(format_seconds_to_time("3600", TimeFormat::Exact), "1:00:00");
+        assert_eq!(format_seconds_to_time("6751", TimeFormat::Exact), "1:52:31");
+        assert_eq!(format_seconds_to_time("invalid", TimeFormat::Exact), "—");
+    }
+
+    #[test]
+    fn test_format_seconds_rounded() {
+        assert_eq!(format_seconds_to_time("0", TimeFormat::Rounded), "—");
+        assert_eq!(format_seconds_to_time("1", TimeFormat::Rounded), "1s");
+        assert_eq!(format_seconds_to_time("53", TimeFormat::Rounded), "53s");
+        assert_eq!(format_seconds_to_time("59", TimeFormat::Rounded), "59s");
+        assert_eq!(format_seconds_to_time("60", TimeFormat::Rounded), "1m");
+        assert_eq!(format_seconds_to_time("89", TimeFormat::Rounded), "1m");
+        assert_eq!(format_seconds_to_time("90", TimeFormat::Rounded), "2m");
+        assert_eq!(format_seconds_to_time("294", TimeFormat::Rounded), "5m");
+        assert_eq!(format_seconds_to_time("1852", TimeFormat::Rounded), "31m");
+        assert_eq!(format_seconds_to_time("3569", TimeFormat::Rounded), "59m");
+        assert_eq!(format_seconds_to_time("3570", TimeFormat::Rounded), "1h");
+        assert_eq!(format_seconds_to_time("3599", TimeFormat::Rounded), "1h");
+        assert_eq!(format_seconds_to_time("3600", TimeFormat::Rounded), "1h");
+        assert_eq!(format_seconds_to_time("5399", TimeFormat::Rounded), "1h");
+        assert_eq!(format_seconds_to_time("5400", TimeFormat::Rounded), "2h");
+        assert_eq!(format_seconds_to_time("6751", TimeFormat::Rounded), "2h");
+        assert_eq!(format_seconds_to_time("invalid", TimeFormat::Rounded), "—");
+    }
+
+    #[test]
+    fn test_region_queue_data_reformat() {
+        let mut row = RegionQueueData::new("[DE]", "Frankfurt", "Standard", "294", "1852");
+        assert_eq!(row.survivor_secs, Some(294));
+        assert_eq!(row.killer_secs, Some(1852));
+        assert_eq!(row.survivor, "294"); // Initial raw string passed to new
+        assert_eq!(row.killer, "1852");
+
+        row.reformat(TimeFormat::Exact);
+        assert_eq!(row.survivor, "4:54");
+        assert_eq!(row.killer, "30:52");
+
+        row.reformat(TimeFormat::Rounded);
+        assert_eq!(row.survivor, "5m");
+        assert_eq!(row.killer, "31m");
+
+        row.reformat(TimeFormat::Exact);
+        assert_eq!(row.survivor, "4:54");
+        assert_eq!(row.killer, "30:52");
     }
 
     #[test]
@@ -513,20 +662,8 @@ mod tests {
     #[test]
     fn test_get_disabled_aws_regions() {
         let queues = vec![
-            RegionQueueData {
-                flag: "[GB]".to_string(),
-                name: "London".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "—".to_string(),
-                killer: "—".to_string(),
-            },
-            RegionQueueData {
-                flag: "[DE]".to_string(),
-                name: "Frankfurt".to_string(),
-                mode: "Standard".to_string(),
-                survivor: "15s".to_string(),
-                killer: "30s".to_string(),
-            },
+            RegionQueueData::new("[GB]", "London", "Standard", "—", "—"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "15s", "30s"),
         ];
         let disabled = get_disabled_aws_regions(&queues);
         assert!(disabled.contains("eu-west-2"));

@@ -1,4 +1,4 @@
-use crate::config::{GameMode, Language, SortOrder};
+use crate::config::{GameMode, Language, SortOrder, TimeFormat};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
@@ -70,6 +70,7 @@ pub enum TextKey {
     HeaderTitle,
     SortLabel,
     ModeLabel,
+    TimeLabel,
     LockLabel,
     LockNone,
     LockActive,
@@ -84,6 +85,7 @@ pub enum TextKey {
     ActionLock,
     ActionSort,
     ActionMode,
+    ActionTime,
     ActionRefresh,
     ActionQuit,
     TimeFetching,
@@ -114,6 +116,7 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::HeaderTitle => " Dead By Queue ",
             TextKey::SortLabel => "Sort: ",
             TextKey::ModeLabel => "Mode: ",
+            TextKey::TimeLabel => "Time: ",
             TextKey::LockLabel => "Lock: ",
             TextKey::LockNone => "None",
             TextKey::LockActive => "Active",
@@ -130,6 +133,7 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ActionLock => "Lock ",
             TextKey::ActionSort => "Sort ",
             TextKey::ActionMode => "Mode ",
+            TextKey::ActionTime => "Time ",
             TextKey::ActionRefresh => "Refresh ",
             TextKey::ActionQuit => "Quit ",
             TextKey::TimeFetching => "fetching...",
@@ -157,6 +161,7 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::HeaderTitle => " Dead By Queue ",
             TextKey::SortLabel => "Сортировка: ",
             TextKey::ModeLabel => "Режим: ",
+            TextKey::TimeLabel => "Время: ",
             TextKey::LockLabel => "Блокировка: ",
             TextKey::LockNone => "Все",
             TextKey::LockActive => "Активен",
@@ -173,6 +178,7 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ActionLock => "Блокировка ",
             TextKey::ActionSort => "Сортировка ",
             TextKey::ActionMode => "Режим ",
+            TextKey::ActionTime => "Время ",
             TextKey::ActionRefresh => "Обновить ",
             TextKey::ActionQuit => "Выход ",
             TextKey::TimeFetching => "Загрузка...",
@@ -225,6 +231,19 @@ pub fn tr_mode(locale: Locale, mode: GameMode) -> &'static str {
         Locale::Ru => match mode {
             GameMode::Standard => "Обычный",
             GameMode::Event => "Ивент",
+        },
+    }
+}
+
+pub fn tr_time_format(locale: Locale, format: TimeFormat) -> &'static str {
+    match locale {
+        Locale::En => match format {
+            TimeFormat::Exact => "Exact",
+            TimeFormat::Rounded => "~Rounded",
+        },
+        Locale::Ru => match format {
+            TimeFormat::Exact => "Точно",
+            TimeFormat::Rounded => "~Округлённо",
         },
     }
 }
@@ -351,6 +370,17 @@ mod tests {
         assert_eq!(
             resolve_locale_from_sources(Language::Auto, None, None, None, None),
             Locale::En
+        );
+    }
+
+    #[test]
+    fn test_tr_time_format() {
+        assert_eq!(tr_time_format(Locale::En, TimeFormat::Exact), "Exact");
+        assert_eq!(tr_time_format(Locale::En, TimeFormat::Rounded), "~Rounded");
+        assert_eq!(tr_time_format(Locale::Ru, TimeFormat::Exact), "Точно");
+        assert_eq!(
+            tr_time_format(Locale::Ru, TimeFormat::Rounded),
+            "~Округлённо"
         );
     }
 }

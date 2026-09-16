@@ -120,6 +120,49 @@ impl Serialize for Language {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TimeFormat {
+    #[default]
+    Exact,
+    Rounded,
+}
+
+impl TimeFormat {
+    #[must_use]
+    pub fn toggle(self) -> Self {
+        match self {
+            Self::Exact => Self::Rounded,
+            Self::Rounded => Self::Exact,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for TimeFormat {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer).unwrap_or_default();
+        Ok(match s.to_lowercase().as_str() {
+            "rounded" => TimeFormat::Rounded,
+            "exact" => TimeFormat::Exact,
+            _ => TimeFormat::Exact,
+        })
+    }
+}
+
+impl Serialize for TimeFormat {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            TimeFormat::Exact => serializer.serialize_str("exact"),
+            TimeFormat::Rounded => serializer.serialize_str("rounded"),
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 pub struct AppConfig {
     #[serde(default)]
@@ -128,6 +171,8 @@ pub struct AppConfig {
     pub sort: SortOrder,
     #[serde(default)]
     pub mode: GameMode,
+    #[serde(default)]
+    pub time_format: TimeFormat,
     #[serde(default)]
     pub lang: Language,
     #[serde(default)]
@@ -140,6 +185,7 @@ impl Default for AppConfig {
             locked: vec![],
             sort: SortOrder::Default,
             mode: GameMode::Standard,
+            time_format: TimeFormat::Exact,
             lang: Language::Auto,
             api_url: None,
         }
@@ -214,12 +260,14 @@ mod tests {
         let config = load_config(test_path);
         assert_eq!(config.sort, SortOrder::Default);
         assert_eq!(config.mode, GameMode::Standard);
+        assert_eq!(config.time_format, TimeFormat::Exact);
         assert_eq!(config.lang, Language::Auto);
         assert!(config.locked.is_empty());
 
         let new_config = AppConfig {
             sort: SortOrder::Survivor,
             mode: GameMode::Event,
+            time_format: TimeFormat::Rounded,
             lang: Language::Ru,
             locked: vec!["eu-central-1".to_string()],
             api_url: None,
@@ -229,10 +277,25 @@ mod tests {
         let loaded = load_config(test_path);
         assert_eq!(loaded.sort, SortOrder::Survivor);
         assert_eq!(loaded.mode, GameMode::Event);
+        assert_eq!(loaded.time_format, TimeFormat::Rounded);
         assert_eq!(loaded.lang, Language::Ru);
         assert_eq!(loaded.locked, vec!["eu-central-1"]);
 
         let _ = fs::remove_file(test_path);
+    }
+
+    #[test]
+    fn test_time_format_toggle_and_serde() {
+        assert_eq!(TimeFormat::Exact.toggle(), TimeFormat::Rounded);
+        assert_eq!(TimeFormat::Rounded.toggle(), TimeFormat::Exact);
+
+        let toml_str = "time_format = \"rounded\"\n";
+        let config: AppConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(config.time_format, TimeFormat::Rounded);
+
+        let toml_str_exact = "time_format = \"exact\"\n";
+        let config_exact: AppConfig = toml::from_str(toml_str_exact).unwrap();
+        assert_eq!(config_exact.time_format, TimeFormat::Exact);
     }
 
     #[test]
@@ -246,6 +309,7 @@ mod tests {
         let config: AppConfig = toml::from_str(legacy_toml).unwrap();
         assert_eq!(config.sort, SortOrder::Killer);
         assert_eq!(config.mode, GameMode::Standard); // "both" maps to Standard
+        assert_eq!(config.time_format, TimeFormat::Exact); // Missing time_format defaults to Exact
         assert_eq!(config.lang, Language::Auto); // Missing lang defaults to Auto
         assert_eq!(config.locked, vec!["us-east-1"]);
 
@@ -253,11 +317,13 @@ mod tests {
         let unknown_toml = r#"
             sort = "unrecognized_sort"
             mode = "custom_mode"
+            time_format = "weird_format"
             lang = "es"
         "#;
         let config2: AppConfig = toml::from_str(unknown_toml).unwrap();
         assert_eq!(config2.sort, SortOrder::Default);
         assert_eq!(config2.mode, GameMode::Standard);
+        assert_eq!(config2.time_format, TimeFormat::Exact);
         assert_eq!(config2.lang, Language::Auto);
 
         // "priority" sort maps to Ping

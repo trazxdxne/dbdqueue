@@ -9,7 +9,8 @@ mod ui;
 
 use crate::app::App;
 use crate::config::{
-    GameMode, SortOrder, get_config_path, load_config, migrate_json_if_needed, save_config,
+    GameMode, SortOrder, TimeFormat, get_config_path, load_config, migrate_json_if_needed,
+    save_config,
 };
 use clap::{Parser, Subcommand};
 use std::process;
@@ -23,6 +24,9 @@ struct Cli {
 
     #[arg(short, long, value_parser = ["standard", "event"], help = "Filter rows by Mode")]
     mode: Option<String>,
+
+    #[arg(short = 't', long = "time", value_parser = ["exact", "rounded"], help = "Time display format (exact, rounded)")]
+    time: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -68,6 +72,15 @@ fn main() {
         config_changed = true;
     }
 
+    if let Some(ref t) = args.time {
+        let time_val = match t.to_lowercase().as_str() {
+            "rounded" => TimeFormat::Rounded,
+            _ => TimeFormat::Exact,
+        };
+        config.time_format = time_val;
+        config_changed = true;
+    }
+
     if config_changed && let Err(e) = save_config(&config_path, &config) {
         eprintln!("Failed to save config: {}", e);
     }
@@ -106,13 +119,17 @@ fn main() {
     let mut app = App::new(
         config.sort,
         config.mode,
+        config.time_format,
         config.locked,
         config.lang,
         config.api_url,
     );
 
     // Initial fetch to show data immediately
-    if let Ok((queues, updated)) = api::fetch_queue_times() {
+    if let Ok((mut queues, updated)) = api::fetch_queue_times() {
+        for q in &mut queues {
+            q.reformat(app.time_format);
+        }
         app.queues = queues;
         app.api_last_updated = updated;
         app.is_fetching = false;

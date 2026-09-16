@@ -395,6 +395,7 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     let mut app = crate::app::App::new(
         crate::config::SortOrder::Default,
         crate::config::GameMode::Standard,
+        crate::config::TimeFormat::Exact,
         current_locked.to_vec(),
         lang,
         None,

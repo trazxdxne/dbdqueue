@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-16
+
+### Added
+- Queue duration format toggle (`[T]` key, with Cyrillic `'е'`/`'Е'` support):
+  - **Exact Mode** (default): Displays precise queue durations formatted as `{m}:{s:02}` (e.g. `0:01`, `0:53`, `4:54`, `30:52`) for waits under 1 hour and `{h}:{m:02}:{s:02}` (e.g. `1:52:31`) for waits 1 hour or longer.
+  - **Rounded Mode**: Displays simplified, rounded durations: `{s}s` (e.g. `1s`, `53s`) for waits under 60 seconds, `{m}m` (e.g. `5m`, `31m`) rounded to the nearest minute, and `{h}h` (e.g. `1h`, `2h`) rounded to the nearest hour.
+- Header time format status indicator placed directly after `Mode:`: `Time: Exact` (RU: `Время: Точно`) and `Time: ~Rounded` (RU: `Время: ~Округлённо`).
+- Footer keybinding shortcut indicator `[T] Time` (RU: `[T] Время`) placed directly after `[M] Mode`.
+- CLI argument `-t, --time <TIME>` (`exact` / `rounded`) to set the initial queue duration display mode.
+- Persistent `time_format` option in `config.toml` (`"exact"` or `"rounded"`).
+
 ## [0.6.5] - 2026-09-16
 
 ### Changed
