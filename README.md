@@ -6,6 +6,11 @@
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20edition-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/trazxdxne/dbdqueue/releases)
 
+<p align="center">
+  <b>Language / Язык:</b>&nbsp;
+  <kbd><b>English</b></kbd>&nbsp;•&nbsp;<a href="README.ru.md"><kbd>Русский</kbd></a>
+</p>
+
 > [!IMPORTANT]
 > **Legal Notice & Trademark Disclaimer**
 > Dead By Queue is an independent, community-developed open-source utility utilizing the public `deadbyqueue.com` API. It is **not affiliated with, endorsed by, sponsored by, or partnered with** Behaviour Interactive Inc., Amazon Web Services, Inc. (AWS), or `deadbyqueue.com`.
@@ -197,3 +202,10 @@ Environment variables are also supported:
 - **CLI Engine**: `clap` (v4.4+) with derive macros
 - **Serialization**: `serde` & `serde_json`, `toml`
 - **Supported Operating Systems**: Linux (x86_64, aarch64), Windows (x64)
+
+---
+
+<p align="center">
+  <a href="README.ru.md">Читать на русском языке (README.ru.md)</a>
+</p>
+
