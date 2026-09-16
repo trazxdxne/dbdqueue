@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] - 2026-09-16
+
+### Changed
+- Improved queue duration display: formatted as `Xs` for durations < 60s, `m:ss` (`1:00` to `59:59`) for multi-minute waits, and `1h+` / `2h+` for long queues, stabilizing column alignment and eliminating cramped letter strings.
+- Refined summary panel title from "Best pick now" / "Лучший выбор сейчас" to "Best Pick" / "Лучший выбор".
+
+### Fixed
+- Fixed layout height allocation on standard 80x24 (and >= 14) terminals to guarantee the Best Pick summary panel remains visible without disappearing when full region lists are loaded.
+- Refactored `dbdq lock` CLI interactive menu to use Ratatui on `EnterAlternateScreen`, eliminating terminal clear-screen flickering, screen scrolling, downward shifting, and scrollback pollution.
+- Added `ListState` scrolling to the region lock modal to ensure the selected region is always visible on compact terminal screens.
+
 ## [0.6.4] - 2026-09-15
 
 ### Changed
