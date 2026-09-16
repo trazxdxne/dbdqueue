@@ -30,10 +30,11 @@ A fast, zero-dependency native terminal dashboard (TUI) for Dead by Daylight pla
 
 ### Real-Time Ratatui Terminal Interface
 - **Pure Native Performance**: Written entirely in Rust with `ratatui` and `crossterm`—no Node.js, Electron, or external runtime required.
-- **Adaptive Layout**: Automatically centers tables and dynamically clamps table heights on smaller terminal viewports to guarantee that header and footer controls are never pushed offscreen.
+- **Adaptive Layout**: Automatically centers tables and guarantees that the **Best Pick** panel, header, and footer controls remain fully visible on standard $80 \times 24$ (and $\ge 14$) viewports with smooth table row scrolling.
+- **Intuitive Time Formatting**: Matchmaking durations are presented as `Xs` ($<60$s), `m:ss` ($1$:00 to $59$:59), and `1h+` / `2h+` ($\ge 1$h), stabilizing column alignment and eliminating cramped letter strings.
 - **Accurate Refresh Timestamps**: Shows the exact age of source data from the API rather than just local poll times.
 
-### Role-Aware Recommendation Engine ("Best pick now")
+### Role-Aware Recommendation Engine ("Best Pick")
 Instead of naively selecting the shortest queue time, `dbdq` computes a role-sensitive composite score balancing queue wait times against network latency:
 
 $$\text{Score} = \text{Wait Time (seconds)} + \text{Latency Penalty}(\text{Ping}, \text{Role})$$
@@ -46,6 +47,7 @@ $$\text{Score} = \text{Wait Time (seconds)} + \text{Latency Penalty}(\text{Ping}
 
 ### AWS Matchmaking Region Locker
 - **Local Firewall & Routing Filter**: Whitelist your preferred server regions (`l` in TUI or `dbdq lock [regions]`) while blocking undesirable remote regions.
+- **Dedicated Interactive CLI Menu**: Running `dbdq lock` opens a flicker-free Ratatui modal on the alternate screen buffer with smooth keyboard navigation and scrolling, leaving the terminal completely clean upon exit.
 - **Zero In-Game Overhead**: Operates entirely through OS-level hosts routing—no packet injection, memory tampering, or VPN overhead.
 - **Non-Blocking Elevation**: Administrative/UAC elevation prompts execute off the main event loop so the UI remains fluid and responsive.
 
