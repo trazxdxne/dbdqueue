@@ -6,7 +6,7 @@ use ratatui::{
     layout::{Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Clear, List, ListItem, Paragraph, Row, Table},
+    widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table},
 };
 
 pub const HEADER_HEIGHT: u16 = 3;
@@ -393,7 +393,9 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
         .collect();
 
     let list = List::new(items);
-    f.render_widget(list, modal_chunks[0]);
+    let mut list_state = ListState::default();
+    list_state.select(Some(app.lock_modal_cursor));
+    f.render_stateful_widget(list, modal_chunks[0], &mut list_state);
 
     // UX Fix 2: Modal action line rendered as a dedicated paragraph with red brackets and default fg text
     let modal_instructions = Line::from(vec![
@@ -524,20 +526,31 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         (rows_data.len() as u16) + TABLE_CHROME_HEIGHT
     };
 
-    // Prevent table from pushing footer off small terminal screens
-    let available_height = f
-        .area()
-        .height
-        .saturating_sub(HEADER_HEIGHT + FOOTER_HEIGHT + 2 * LAYOUT_MARGIN);
-    let table_height = desired_table_height.min(available_height);
+    let margin = if f.area().height < 20 { 0 } else { LAYOUT_MARGIN };
+    let non_table_fixed = HEADER_HEIGHT + SUMMARY_HEIGHT + FOOTER_HEIGHT + 2 * margin;
+
+    let (show_summary, table_height) = if f.area().height >= non_table_fixed + 4 {
+        let available_for_table = f.area().height.saturating_sub(non_table_fixed);
+        (true, desired_table_height.min(available_for_table))
+    } else {
+        let available_without_summary = f
+            .area()
+            .height
+            .saturating_sub(HEADER_HEIGHT + FOOTER_HEIGHT + 2 * margin);
+        (false, desired_table_height.min(available_without_summary))
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(LAYOUT_MARGIN)
+        .margin(margin)
         .constraints([
             Constraint::Length(HEADER_HEIGHT),
             Constraint::Length(table_height),
-            Constraint::Min(0),
+            if show_summary {
+                Constraint::Min(SUMMARY_HEIGHT)
+            } else {
+                Constraint::Min(0)
+            },
             Constraint::Length(FOOTER_HEIGHT),
         ])
         .split(f.area());
@@ -546,7 +559,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     draw_header(f, app, chunks[0]);
     draw_table(f, app, table_area);
-    draw_summary(f, app, chunks[2]);
+    if show_summary {
+        draw_summary(f, app, chunks[2]);
+    }
     draw_footer(f, app, chunks[3]);
 
     if app.show_lock_modal {
@@ -667,12 +682,58 @@ mod tests {
             let line: String = (0..buffer.area.width)
                 .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
                 .collect();
-            if line.contains("Best pick now") {
+            if line.contains("Best Pick") {
                 found_summary = true;
                 break;
             }
         }
         assert!(found_summary, "Summary panel should be rendered in buffer");
+    }
+
+    #[test]
+    fn test_draw_with_full_regions_on_80x24_terminal() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            vec![],
+            Language::En,
+            None,
+        );
+        let all_aws = api::get_all_aws_regions();
+        let aws_to_api = api::get_aws_to_api();
+        for &code in &all_aws {
+            let name = aws_to_api.get(code).unwrap_or(&code);
+            app.queues.push(api::RegionQueueData {
+                flag: "".to_string(),
+                name: name.to_string(),
+                mode: "Standard".to_string(),
+                survivor: "10s".to_string(),
+                killer: "15s".to_string(),
+            });
+            app.pings.insert(code.to_string(), 40);
+        }
+        assert_eq!(app.queues.len(), 15);
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let mut found_summary = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Best Pick") {
+                found_summary = true;
+                break;
+            }
+        }
+        assert!(
+            found_summary,
+            "Summary panel must remain visible on 80x24 terminal even with full 15 regions"
+        );
     }
 
     #[test]
@@ -714,7 +775,7 @@ mod tests {
             let line: String = (0..80)
                 .map(|x| buf_small[(x, y)].symbol().chars().next().unwrap_or(' '))
                 .collect();
-            assert!(!line.contains("Лучший выбор сейчас"));
+            assert!(!line.contains("Лучший выбор"));
         }
 
         // Test Russian rendering when height >= 4
@@ -731,7 +792,7 @@ mod tests {
             let line: String = (0..80)
                 .map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' '))
                 .collect();
-            if line.contains("Лучший выбор сейчас") {
+            if line.contains("Лучший выбор") {
                 found_title = true;
             }
             if line.contains("Маньяк:") {
@@ -808,7 +869,7 @@ mod tests {
             .collect();
 
         // Check top border and title
-        assert!(l0.contains("Best pick now"), "Line 0 should have title");
+        assert!(l0.contains("Best Pick"), "Line 0 should have title");
         assert!(l0.contains('┌'), "Line 0 should have top border");
 
         // Check rows: Killer and Survivor present, Ping row deleted

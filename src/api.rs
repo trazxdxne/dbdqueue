@@ -116,6 +116,35 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
         return 999999;
     }
 
+    if let Some(pos) = s.find(|c| c == 'h' || c == 'H') {
+        let num_str = s[..pos].trim();
+        if let Ok(hours) = num_str.parse::<u32>() {
+            return hours.saturating_mul(3600);
+        }
+    }
+
+    if s.contains(':') {
+        let parts: Vec<&str> = s.split(':').map(|p| p.trim()).collect();
+        if parts.len() == 2 {
+            if let (Ok(m), Ok(sec)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
+                let total = m.saturating_mul(60).saturating_add(sec);
+                return if total > 0 { total } else { 999999 };
+            }
+        } else if parts.len() == 3 {
+            if let (Ok(h), Ok(m), Ok(sec)) = (
+                parts[0].parse::<u32>(),
+                parts[1].parse::<u32>(),
+                parts[2].parse::<u32>(),
+            ) {
+                let total = h
+                    .saturating_mul(3600)
+                    .saturating_add(m.saturating_mul(60))
+                    .saturating_add(sec);
+                return if total > 0 { total } else { 999999 };
+            }
+        }
+    }
+
     let mut total = 0u32;
     let mut current_num = 0u32;
     let mut has_num = false;
@@ -166,14 +195,13 @@ pub fn format_seconds_to_time(seconds_str: &str) -> String {
             "—".to_string()
         } else if sec < 60 {
             format!("{}s", sec)
-        } else {
+        } else if sec < 3600 {
             let m = sec / 60;
             let s = sec % 60;
-            if s > 0 {
-                format!("{}m{}s", m, s)
-            } else {
-                format!("{}m", m)
-            }
+            format!("{}:{:02}", m, s)
+        } else {
+            let h = sec / 3600;
+            format!("{}h+", h)
         }
     } else {
         "—".to_string()
@@ -402,6 +430,12 @@ mod tests {
     #[test]
     fn test_parse_time() {
         assert_eq!(parse_time_to_seconds("5s"), 5);
+        assert_eq!(parse_time_to_seconds("59s"), 59);
+        assert_eq!(parse_time_to_seconds("1:00"), 60);
+        assert_eq!(parse_time_to_seconds("3:27"), 207);
+        assert_eq!(parse_time_to_seconds("34:25"), 2065);
+        assert_eq!(parse_time_to_seconds("1h+"), 3600);
+        assert_eq!(parse_time_to_seconds("2h+"), 7200);
         assert_eq!(parse_time_to_seconds("3m"), 180);
         assert_eq!(parse_time_to_seconds("3m27s"), 207);
         assert_eq!(parse_time_to_seconds("—"), 999999);
@@ -411,8 +445,14 @@ mod tests {
     #[test]
     fn test_format_seconds() {
         assert_eq!(format_seconds_to_time("5"), "5s");
-        assert_eq!(format_seconds_to_time("180"), "3m");
-        assert_eq!(format_seconds_to_time("207"), "3m27s");
+        assert_eq!(format_seconds_to_time("59"), "59s");
+        assert_eq!(format_seconds_to_time("60"), "1:00");
+        assert_eq!(format_seconds_to_time("180"), "3:00");
+        assert_eq!(format_seconds_to_time("207"), "3:27");
+        assert_eq!(format_seconds_to_time("2065"), "34:25");
+        assert_eq!(format_seconds_to_time("3599"), "59:59");
+        assert_eq!(format_seconds_to_time("3600"), "1h+");
+        assert_eq!(format_seconds_to_time("7200"), "2h+");
         assert_eq!(format_seconds_to_time("0"), "—");
         assert_eq!(format_seconds_to_time("invalid"), "—");
     }

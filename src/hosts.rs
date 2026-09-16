@@ -2,12 +2,14 @@ use crate::api::get_all_aws_regions;
 use crossterm::{
     cursor,
     event::{self, Event, KeyCode, KeyModifiers},
-    terminal::{disable_raw_mode, enable_raw_mode},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
+use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::time::Duration;
 
 pub const START_BLOCK: &str = "# --- DBD REGION CHANGER START ---";
 pub const END_BLOCK: &str = "# --- DBD REGION CHANGER END ---";
@@ -376,165 +378,108 @@ pub fn flush_dns_cache() {
     }
 }
 
-fn run_interactive_menu(
-    title: &str,
-    options: &[(String, String)],
-    initial_selected: &[String],
-    instructions: &str,
-) -> Option<Vec<String>> {
-    let mut selected: Vec<bool> = options
-        .iter()
-        .map(|(_, val)| initial_selected.contains(val))
-        .collect();
-    let mut cursor_pos = 0;
-
-    let mut stdout = io::stdout();
-    enable_raw_mode().ok()?;
-
-    // Drain any leftover events (e.g. Enter key from starting the command)
-    while event::poll(std::time::Duration::from_millis(50)).unwrap_or(false) {
-        let _ = event::read();
-    }
-
-    let _ = crossterm::execute!(stdout, cursor::Hide);
-    write!(stdout, "\x1b[H\x1b[2J").ok();
-    stdout.flush().ok();
-
-    loop {
-        write!(stdout, "\x1b[H\x1b[2J").ok();
-        write!(stdout, "\x1b[1m\x1b[91m{}\x1b[0m\r\n", title).ok();
-        write!(stdout, "{}\r\n\r\n", instructions).ok();
-
-        for (i, (display, _)) in options.iter().enumerate() {
-            let checked = if selected[i] { "[*]" } else { "[ ]" };
-            let color = if selected[i] { "\x1b[92m" } else { "\x1b[90m" };
-
-            if i == cursor_pos {
-                write!(stdout, " \x1b[7m {} {} \x1b[27m\r\n", checked, display).ok();
-            } else {
-                write!(stdout, " {} {} {}\x1b[0m\r\n", color, checked, display).ok();
-            }
-        }
-        stdout.flush().ok();
-
-        if let Ok(Event::Key(key)) = event::read() {
-            if key.kind != crossterm::event::KeyEventKind::Press {
-                continue;
-            }
-            match key.code {
-                KeyCode::Up => {
-                    cursor_pos = (cursor_pos + options.len() - 1) % options.len();
-                }
-                KeyCode::Down => {
-                    cursor_pos = (cursor_pos + 1) % options.len();
-                }
-                KeyCode::Char(' ') => {
-                    selected[cursor_pos] = !selected[cursor_pos];
-                }
-                KeyCode::Enter => {
-                    break;
-                }
-                KeyCode::Esc => {
-                    let cancel_msg = if is_russian() {
-                        "\r\n\x1b[91mОтменено.\x1b[0m\r\n"
-                    } else {
-                        "\r\n\x1b[91mCancelled.\x1b[0m\r\n"
-                    };
-                    disable_raw_mode().ok();
-                    let _ = crossterm::execute!(stdout, cursor::Show);
-                    write!(stdout, "{}", cancel_msg).ok();
-                    stdout.flush().ok();
-                    return None;
-                }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    let cancel_msg = if is_russian() {
-                        "\r\n\x1b[91mОтменено.\x1b[0m\r\n"
-                    } else {
-                        "\r\n\x1b[91mCancelled.\x1b[0m\r\n"
-                    };
-                    disable_raw_mode().ok();
-                    let _ = crossterm::execute!(stdout, cursor::Show);
-                    write!(stdout, "{}", cancel_msg).ok();
-                    stdout.flush().ok();
-                    return None;
-                }
-                _ => {}
-            }
-        }
-    }
-
-    disable_raw_mode().ok();
-    let _ = crossterm::execute!(stdout, cursor::Show);
-    stdout.flush().ok();
-
-    let result = options
-        .iter()
-        .enumerate()
-        .filter(|(i, _)| selected[*i])
-        .map(|(_, (_, val))| val.clone())
-        .collect();
-    Some(result)
-}
-
 pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     let is_ru = is_russian();
     let queues = crate::api::fetch_queue_times()
         .map(|(q, _)| q)
         .unwrap_or_default();
-    let disabled = crate::api::get_disabled_aws_regions(&queues);
     let pings = crate::ping::measure_all_regions_ping();
-    let mut aws_regions: Vec<&'static str> = crate::api::get_all_aws_regions()
-        .into_iter()
-        .filter(|reg| !disabled.contains(*reg))
-        .collect();
-    aws_regions.sort_by(|&a, &b| {
-        let a_ping = pings.get(a).copied().unwrap_or(u32::MAX);
-        let b_ping = pings.get(b).copied().unwrap_or(u32::MAX);
-        a_ping.cmp(&b_ping).then_with(|| {
-            let aws_to_api = crate::api::get_aws_to_api();
-            let a_name = aws_to_api.get(a).unwrap_or(&a);
-            let b_name = aws_to_api.get(b).unwrap_or(&b);
-            a_name.cmp(b_name)
-        })
-    });
 
-    let aws_to_api = crate::api::get_aws_to_api();
-    let aws_to_flag = crate::api::get_aws_to_flag();
-
-    let options: Vec<(String, String)> = aws_regions
-        .iter()
-        .map(|code| {
-            let name = aws_to_api.get(*code).unwrap_or(code);
-            let flag = aws_to_flag.get(*code).unwrap_or(&"");
-            let flag_str = if flag.is_empty() {
-                String::new()
-            } else {
-                format!("{} ", flag)
-            };
-            let ping_str = if let Some(&ms) = pings.get(*code) {
-                format!(" - {} ms", ms)
-            } else {
-                String::new()
-            };
-            (
-                format!("{}{}{} ({}){}", flag_str, name, "", code, ping_str),
-                code.to_string(),
-            )
-        })
-        .collect();
-
-    let title = if is_ru {
-        "Блокировка регионов"
+    let lang = if is_ru {
+        crate::config::Language::Ru
     } else {
-        "Region Locker"
+        crate::config::Language::En
     };
-    let instructions = if is_ru {
-        "\x1b[91m[↑↓]\x1b[0m Выбор  \x1b[91m[Пробел]\x1b[0m Вкл/Выкл  \x1b[91m[Enter]\x1b[0m Сохранить  \x1b[91m[Esc]\x1b[0m Отмена"
-    } else {
-        "\x1b[91m[↑↓]\x1b[0m Select  \x1b[91m[Space]\x1b[0m Toggle  \x1b[91m[Enter]\x1b[0m Save  \x1b[91m[Esc]\x1b[0m Cancel"
-    };
+    let mut app = crate::app::App::new(
+        crate::config::SortOrder::Default,
+        crate::config::GameMode::Standard,
+        current_locked.to_vec(),
+        lang,
+        None,
+    );
+    app.queues = queues;
+    app.pings = pings;
+    app.open_lock_modal();
 
-    run_interactive_menu(title, &options, current_locked, instructions)
+    enable_raw_mode().ok()?;
+    let mut stdout = io::stdout();
+    crossterm::execute!(stdout, EnterAlternateScreen, cursor::Hide).ok()?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).ok()?;
+
+    // Drain any leftover input events
+    while event::poll(Duration::from_millis(50)).unwrap_or(false) {
+        let _ = event::read();
+    }
+
+    let mut applied = false;
+    let mut cancelled = false;
+
+    loop {
+        terminal
+            .draw(|f| {
+                let modal_area = if f.area().width <= 80 || f.area().height <= 24 {
+                    f.area()
+                } else {
+                    crate::ui::centered_rect(70, 80, f.area())
+                };
+                crate::ui::draw_lock_modal(f, &app, modal_area);
+            })
+            .ok();
+
+        match event::read() {
+            Ok(Event::Key(key)) => {
+                if key.kind != crossterm::event::KeyEventKind::Press {
+                    continue;
+                }
+                match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        app.lock_modal_up();
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        app.lock_modal_down();
+                    }
+                    KeyCode::Char(' ') => {
+                        app.lock_modal_toggle();
+                    }
+                    KeyCode::Enter => {
+                        applied = true;
+                        break;
+                    }
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        cancelled = true;
+                        break;
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        cancelled = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Event::Resize(_, _)) => {
+                // Buffer resize handled automatically by Ratatui on next draw
+            }
+            _ => {}
+        }
+    }
+
+    disable_raw_mode().ok();
+    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show).ok();
+
+    if cancelled || !applied {
+        let cancel_msg = if is_ru {
+            "Отменено."
+        } else {
+            "Cancelled."
+        };
+        eprintln!("\x1b[91m{}\x1b[0m", cancel_msg);
+        return None;
+    }
+
+    let mut res = app.lock_modal_selected;
+    res.sort();
+    Some(res)
 }
 
 #[cfg(test)]
