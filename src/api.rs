@@ -116,7 +116,7 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
         return 999999;
     }
 
-    if let Some(pos) = s.find(|c| c == 'h' || c == 'H') {
+    if let Some(pos) = s.find(['h', 'H']) {
         let num_str = s[..pos].trim();
         if let Ok(hours) = num_str.parse::<u32>() {
             return hours.saturating_mul(3600);
@@ -125,23 +125,23 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
 
     if s.contains(':') {
         let parts: Vec<&str> = s.split(':').map(|p| p.trim()).collect();
-        if parts.len() == 2 {
-            if let (Ok(m), Ok(sec)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>()) {
-                let total = m.saturating_mul(60).saturating_add(sec);
-                return if total > 0 { total } else { 999999 };
-            }
-        } else if parts.len() == 3 {
-            if let (Ok(h), Ok(m), Ok(sec)) = (
+        if parts.len() == 2
+            && let (Ok(m), Ok(sec)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+        {
+            let total = m.saturating_mul(60).saturating_add(sec);
+            return if total > 0 { total } else { 999999 };
+        } else if parts.len() == 3
+            && let (Ok(h), Ok(m), Ok(sec)) = (
                 parts[0].parse::<u32>(),
                 parts[1].parse::<u32>(),
                 parts[2].parse::<u32>(),
-            ) {
-                let total = h
-                    .saturating_mul(3600)
-                    .saturating_add(m.saturating_mul(60))
-                    .saturating_add(sec);
-                return if total > 0 { total } else { 999999 };
-            }
+            )
+        {
+            let total = h
+                .saturating_mul(3600)
+                .saturating_add(m.saturating_mul(60))
+                .saturating_add(sec);
+            return if total > 0 { total } else { 999999 };
         }
     }
 

@@ -7,6 +7,8 @@ use crossterm::{
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs;
 use std::io;
+#[cfg(not(windows))]
+use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;

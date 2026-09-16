@@ -526,7 +526,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         (rows_data.len() as u16) + TABLE_CHROME_HEIGHT
     };
 
-    let margin = if f.area().height < 20 { 0 } else { LAYOUT_MARGIN };
+    let margin = if f.area().height < 20 {
+        0
+    } else {
+        LAYOUT_MARGIN
+    };
     let non_table_fixed = HEADER_HEIGHT + SUMMARY_HEIGHT + FOOTER_HEIGHT + 2 * margin;
 
     let (show_summary, table_height) = if f.area().height >= non_table_fixed + 4 {
