@@ -183,6 +183,8 @@ pub struct App {
     pub locale: Locale,
     pub lang: Language,
     pub api_url: Option<String>,
+    pub current_event: Option<api::EventItem>,
+    pub upcoming_event: Option<api::EventItem>,
 }
 
 impl App {
@@ -214,6 +216,8 @@ impl App {
             locale,
             lang,
             api_url,
+            current_event: None,
+            upcoming_event: None,
         }
     }
 
@@ -496,8 +500,10 @@ impl App {
         &mut self,
         api_res: Result<(Vec<RegionQueueData>, i64), String>,
         ping_res: HashMap<String, u32>,
+        misc_res: Result<api::MiscResponse, String>,
         now: Instant,
     ) {
+        self.handle_misc_update(misc_res);
         self.is_fetching = false;
         self.pings = ping_res;
         match api_res {
@@ -551,6 +557,13 @@ impl App {
 
     pub fn handle_ping_update(&mut self, pings: HashMap<String, u32>) {
         self.pings = pings;
+    }
+
+    pub fn handle_misc_update(&mut self, res: Result<api::MiscResponse, String>) {
+        if let Ok(misc) = res {
+            self.current_event = misc.current_events.into_iter().next();
+            self.upcoming_event = misc.upcoming_events.into_iter().next();
+        }
     }
 
     pub fn get_filtered_sorted_rows(&self) -> Vec<&RegionQueueData> {
@@ -1181,5 +1194,69 @@ mod tests {
         assert_eq!(Role::Survivor.ping_penalty(50), 0);
         assert_eq!(Role::Survivor.ping_penalty(80), 20);
         assert_eq!(Role::Survivor.ping_penalty(300), 850);
+    }
+
+    #[test]
+    fn test_handle_misc_update_current_event() {
+        let mut app = make_test_app();
+        let misc = api::MiscResponse {
+            online: true,
+            current_events: vec![api::EventItem {
+                name: "2v8 event".to_string(),
+                start: "1788879600".to_string(),
+                end: "1790694000".to_string(),
+            }],
+            upcoming_events: vec![],
+        };
+        app.handle_misc_update(Ok(misc));
+        assert!(app.current_event.is_some());
+        assert_eq!(app.current_event.as_ref().unwrap().name, "2v8 event");
+        assert!(app.upcoming_event.is_none());
+    }
+
+    #[test]
+    fn test_handle_misc_update_upcoming_event() {
+        let mut app = make_test_app();
+        let misc = api::MiscResponse {
+            online: true,
+            current_events: vec![],
+            upcoming_events: vec![api::EventItem {
+                name: "Anniversary".to_string(),
+                start: "1800000000".to_string(),
+                end: "1800100000".to_string(),
+            }],
+        };
+        app.handle_misc_update(Ok(misc));
+        assert!(app.current_event.is_none());
+        assert!(app.upcoming_event.is_some());
+        assert_eq!(app.upcoming_event.as_ref().unwrap().name, "Anniversary");
+    }
+
+    #[test]
+    fn test_handle_misc_update_empty() {
+        let mut app = make_test_app();
+        let misc = api::MiscResponse {
+            online: true,
+            current_events: vec![],
+            upcoming_events: vec![],
+        };
+        app.handle_misc_update(Ok(misc));
+        assert!(app.current_event.is_none());
+        assert!(app.upcoming_event.is_none());
+    }
+
+    #[test]
+    fn test_handle_misc_update_error_preserves_state() {
+        let mut app = make_test_app();
+        // Set initial event data
+        app.current_event = Some(api::EventItem {
+            name: "old event".to_string(),
+            start: "100".to_string(),
+            end: "200".to_string(),
+        });
+        // Error should not clear existing data
+        app.handle_misc_update(Err("network error".to_string()));
+        assert!(app.current_event.is_some());
+        assert_eq!(app.current_event.as_ref().unwrap().name, "old event");
     }
 }
