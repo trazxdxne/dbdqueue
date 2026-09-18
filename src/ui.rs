@@ -81,7 +81,7 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         tr(app.locale, TextKey::LockActive)
     };
 
-    let header_line = Line::from(vec![
+    let mut spans = vec![
         Span::styled(
             tr(app.locale, TextKey::SortLabel),
             Style::default().fg(Color::DarkGray),
@@ -103,6 +103,33 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         ),
+    ];
+
+    if app.mode == crate::config::GameMode::Event {
+        let now_ts = chrono::Local::now().timestamp();
+        if let Some(ref ev) = app.current_event
+            && let Ok(end_ts) = ev.end.trim().parse::<i64>()
+        {
+            let remaining = (end_ts - now_ts).max(0) as u64;
+            let countdown = crate::api::format_event_countdown(remaining, app.time_format);
+            let left_str = tr(app.locale, TextKey::EventLeft);
+            let text = format!(" [{} - {} {}]", ev.name, countdown, left_str);
+            spans.push(Span::styled(text, Style::default().fg(Color::LightYellow)));
+        } else if let Some(ref ev) = app.upcoming_event
+            && let Some(dt) = crate::api::event_timestamp_to_local(&ev.start)
+        {
+            let dt_str = crate::api::format_local_datetime(dt);
+            let upcoming_str = tr(app.locale, TextKey::EventUpcoming);
+            let starts_str = tr(app.locale, TextKey::EventStartsIn);
+            let text = format!(
+                " [{}: {} - {} {}]",
+                upcoming_str, ev.name, starts_str, dt_str
+            );
+            spans.push(Span::styled(text, Style::default().fg(Color::DarkGray)));
+        }
+    }
+
+    spans.extend([
         Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             tr(app.locale, TextKey::TimeLabel),
@@ -131,7 +158,7 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         ),
     ]);
 
-    let header = Paragraph::new(header_line).block(
+    let header = Paragraph::new(Line::from(spans)).block(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::LightRed))
@@ -152,15 +179,54 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     let api_to_aws = api::get_api_to_aws();
     let (rows, col_constraints) = if is_empty {
         let (msg, color) = if app.is_fetching {
-            (tr(app.locale, TextKey::FetchingQueues), Color::LightRed)
+            (
+                tr(app.locale, TextKey::FetchingQueues).to_string(),
+                Color::LightRed,
+            )
         } else if app
             .notice
             .as_ref()
             .is_some_and(|n| n.kind == NoticeKind::Error)
         {
-            (tr(app.locale, TextKey::FailedQueues), Color::Red)
+            (
+                tr(app.locale, TextKey::FailedQueues).to_string(),
+                Color::Red,
+            )
+        } else if app.mode == crate::config::GameMode::Event {
+            if let Some(ref ev) = app.upcoming_event {
+                if let Some(dt) = crate::api::event_timestamp_to_local(&ev.start) {
+                    let dt_str = crate::api::format_local_datetime(dt);
+                    let now_ts = chrono::Local::now().timestamp();
+                    let start_ts = ev.start.trim().parse::<i64>().unwrap_or(0);
+                    let remaining = (start_ts - now_ts).max(0) as u64;
+                    let countdown = crate::api::format_event_countdown(remaining, app.time_format);
+                    let upcoming_str = tr(app.locale, TextKey::EventUpcoming);
+                    let starts_str = tr(app.locale, TextKey::EventStartsIn);
+                    let in_str = tr(app.locale, TextKey::EventIn);
+                    (
+                        format!(
+                            "  {}: {} ({} {} - {} {})",
+                            upcoming_str, ev.name, starts_str, dt_str, in_str, countdown
+                        ),
+                        Color::LightYellow,
+                    )
+                } else {
+                    (
+                        format!("  {}", tr(app.locale, TextKey::NoDataForMode)),
+                        Color::DarkGray,
+                    )
+                }
+            } else {
+                (
+                    format!("  {}", tr(app.locale, TextKey::NoDataForMode)),
+                    Color::DarkGray,
+                )
+            }
         } else {
-            (tr(app.locale, TextKey::NoDataForMode), Color::DarkGray)
+            (
+                tr(app.locale, TextKey::NoDataForMode).to_string(),
+                Color::DarkGray,
+            )
         };
         (
             vec![Row::new(vec![
@@ -945,5 +1011,47 @@ mod tests {
             "Header must display 'Time: ~Rounded', got: '{}'",
             l0_rounded
         );
+    }
+
+    #[test]
+    fn test_header_event_badge_only_in_event_mode() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Rounded,
+            vec![],
+            Language::En,
+            None,
+        );
+        app.current_event = Some(api::EventItem {
+            name: "2v8 event".to_string(),
+            start: "1000".to_string(),
+            end: format!("{}", chrono::Local::now().timestamp() + 86400 * 11),
+        });
+
+        let backend = TestBackend::new(100, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        // 1. Standard mode: event badge must NOT appear
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let header_line: String = (0..100)
+            .map(|x| buffer[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(header_line.contains("Mode: Standard"));
+        assert!(
+            !header_line.contains("2v8 event"),
+            "Event badge must not appear in Standard mode"
+        );
+
+        // 2. Event mode: event badge appears right after Mode: Event
+        app.mode = GameMode::Event;
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer2 = terminal.backend().buffer();
+        let header_line_event: String = (0..100)
+            .map(|x| buffer2[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(header_line_event.contains("Mode: Event [2v8 event - 11d left]"));
+        assert!(header_line_event.contains("│  Time: ~Rounded"));
     }
 }

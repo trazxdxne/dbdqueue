@@ -242,6 +242,23 @@ pub(crate) struct Api2Response {
     queues: HashMap<String, HashMap<String, QueueData>>,
 }
 
+#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct EventItem {
+    pub name: String,
+    pub start: String,
+    pub end: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MiscResponse {
+    #[allow(dead_code)]
+    pub online: bool,
+    #[serde(rename = "currentEvents")]
+    pub current_events: Vec<EventItem>,
+    #[serde(rename = "upcomingEvents")]
+    pub upcoming_events: Vec<EventItem>,
+}
+
 pub fn format_seconds(sec: u32, format: TimeFormat) -> String {
     if sec == 0 {
         return "—".to_string();
@@ -410,6 +427,70 @@ pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
     }
 
     Ok((data, api_data.lastupdated2))
+}
+
+pub fn fetch_misc_data() -> Result<MiscResponse, String> {
+    let agent = ureq::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .try_proxy_from_env(true)
+        .build();
+
+    let resp = agent
+        .get("https://api2.deadbyqueue.com/misc")
+        .set("User-Agent", "curl/8.7.1")
+        .set("Accept", "application/json")
+        .call()
+        .map_err(|e| format!("Error connecting to misc API: {}", e))?;
+
+    let status = resp.status();
+    let body = resp
+        .into_string()
+        .map_err(|e| format!("Error reading misc response (HTTP {}): {}", status, e))?;
+
+    serde_json::from_str::<MiscResponse>(body.trim())
+        .map_err(|e| format!("Error parsing misc JSON: {}", e))
+}
+
+pub fn format_event_countdown(remaining_secs: u64, format: TimeFormat) -> String {
+    let days = remaining_secs / 86400;
+    let hours = (remaining_secs % 86400) / 3600;
+    let mins = (remaining_secs % 3600) / 60;
+    let secs = remaining_secs % 60;
+
+    match format {
+        TimeFormat::Exact => {
+            if days >= 1 {
+                format!("{}d {:02}:{:02}:{:02}", days, hours, mins, secs)
+            } else if remaining_secs >= 3600 {
+                format!("{:02}:{:02}:{:02}", hours, mins, secs)
+            } else if remaining_secs >= 60 {
+                format!("{:02}:{:02}", mins, secs)
+            } else {
+                format!("00:{:02}", secs)
+            }
+        }
+        TimeFormat::Rounded => {
+            if days >= 1 {
+                format!("{}d", days)
+            } else if remaining_secs >= 3600 {
+                format!("{}h", hours)
+            } else if remaining_secs >= 60 {
+                format!("{}m", mins)
+            } else {
+                format!("{}s", secs)
+            }
+        }
+    }
+}
+
+pub fn event_timestamp_to_local(ts_str: &str) -> Option<chrono::DateTime<chrono::Local>> {
+    let ts: i64 = ts_str.trim().parse().ok()?;
+    let utc = chrono::DateTime::from_timestamp(ts, 0)?;
+    Some(utc.with_timezone(&chrono::Local))
+}
+
+pub fn format_local_datetime(dt: chrono::DateTime<chrono::Local>) -> String {
+    dt.format("%b %d, %H:%M").to_string()
 }
 
 pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
@@ -694,5 +775,93 @@ mod tests {
         ];
         let codes = resolve_to_aws_codes(&input);
         assert_eq!(codes, vec!["eu-central-1", "sa-east-1", "us-east-1"]);
+    }
+
+    #[test]
+    fn test_format_event_countdown_exact() {
+        // >= 1 day: "Xd HH:MM:SS"
+        assert_eq!(
+            format_event_countdown(90000, TimeFormat::Exact),
+            "1d 01:00:00"
+        );
+        assert_eq!(
+            format_event_countdown(86400, TimeFormat::Exact),
+            "1d 00:00:00"
+        );
+        assert_eq!(
+            format_event_countdown(172800 + 3661, TimeFormat::Exact),
+            "2d 01:01:01"
+        );
+        // >= 1 hour, < 1 day: "HH:MM:SS"
+        assert_eq!(format_event_countdown(3661, TimeFormat::Exact), "01:01:01");
+        assert_eq!(format_event_countdown(3600, TimeFormat::Exact), "01:00:00");
+        // >= 1 min, < 1 hour: "MM:SS"
+        assert_eq!(format_event_countdown(110, TimeFormat::Exact), "01:50");
+        assert_eq!(format_event_countdown(60, TimeFormat::Exact), "01:00");
+        // < 1 min: "00:SS"
+        assert_eq!(format_event_countdown(45, TimeFormat::Exact), "00:45");
+        assert_eq!(format_event_countdown(0, TimeFormat::Exact), "00:00");
+    }
+
+    #[test]
+    fn test_format_event_countdown_rounded() {
+        // >= 1 day: "Xd"
+        assert_eq!(format_event_countdown(90000, TimeFormat::Rounded), "1d");
+        assert_eq!(format_event_countdown(172800, TimeFormat::Rounded), "2d");
+        // >= 1 hour, < 1 day: "Xh"
+        assert_eq!(format_event_countdown(7200, TimeFormat::Rounded), "2h");
+        assert_eq!(format_event_countdown(3600, TimeFormat::Rounded), "1h");
+        // >= 1 min, < 1 hour: "Xm"
+        assert_eq!(format_event_countdown(120, TimeFormat::Rounded), "2m");
+        assert_eq!(format_event_countdown(60, TimeFormat::Rounded), "1m");
+        // < 1 min: "Xs"
+        assert_eq!(format_event_countdown(45, TimeFormat::Rounded), "45s");
+        assert_eq!(format_event_countdown(0, TimeFormat::Rounded), "0s");
+    }
+
+    #[test]
+    fn test_misc_response_deserialization() {
+        let json = r#"{
+            "online": true,
+            "currentEvents": [
+                {"name": "2v8 event", "start": "1788879600", "end": "1790694000"}
+            ],
+            "upcomingEvents": []
+        }"#;
+        let resp: MiscResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.online);
+        assert_eq!(resp.current_events.len(), 1);
+        assert_eq!(resp.current_events[0].name, "2v8 event");
+        assert_eq!(resp.current_events[0].start, "1788879600");
+        assert_eq!(resp.current_events[0].end, "1790694000");
+        assert!(resp.upcoming_events.is_empty());
+    }
+
+    #[test]
+    fn test_misc_response_empty_events() {
+        let json = r#"{"online": false, "currentEvents": [], "upcomingEvents": []}"#;
+        let resp: MiscResponse = serde_json::from_str(json).unwrap();
+        assert!(!resp.online);
+        assert!(resp.current_events.is_empty());
+        assert!(resp.upcoming_events.is_empty());
+    }
+
+    #[test]
+    fn test_event_timestamp_to_local() {
+        // Valid timestamp
+        let dt = event_timestamp_to_local("1788879600");
+        assert!(dt.is_some());
+        // Invalid
+        assert!(event_timestamp_to_local("not_a_number").is_none());
+        assert!(event_timestamp_to_local("").is_none());
+    }
+
+    #[test]
+    fn test_format_local_datetime() {
+        let dt = event_timestamp_to_local("1788879600").unwrap();
+        let s = format_local_datetime(dt);
+        // Should contain month abbreviation, day, and HH:MM
+        assert!(s.contains(':'), "Should contain time separator: {}", s);
+        assert!(s.contains(','), "Should contain comma separator: {}", s);
     }
 }

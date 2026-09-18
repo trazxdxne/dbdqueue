@@ -14,9 +14,11 @@ pub enum AppEvent {
     Tick,
     ApiUpdate(Result<(Vec<crate::api::RegionQueueData>, i64), String>),
     PingUpdate(std::collections::HashMap<String, u32>),
+    MiscUpdate(Result<crate::api::MiscResponse, String>),
     ManualRefreshComplete {
         api_res: Result<(Vec<crate::api::RegionQueueData>, i64), String>,
         ping_res: std::collections::HashMap<String, u32>,
+        misc_res: Result<crate::api::MiscResponse, String>,
     },
     HostsUpdateComplete {
         result: crate::hosts::UpdateHostsResult,
@@ -81,6 +83,16 @@ pub fn run_app(
         }
     });
 
+    // Misc/event thread (every 60s)
+    let tx_misc = tx.clone();
+    thread::spawn(move || {
+        loop {
+            let res = crate::api::fetch_misc_data();
+            tx_misc.send(AppEvent::MiscUpdate(res)).unwrap_or(());
+            thread::sleep(Duration::from_secs(60));
+        }
+    });
+
     let dispatch_action = |action: crate::app::AppAction,
                            app: &mut crate::app::App,
                            tx: &mpsc::Sender<AppEvent>| {
@@ -91,12 +103,20 @@ pub fn run_app(
                 thread::spawn(move || {
                     let api_handle = thread::spawn(crate::api::fetch_queue_times);
                     let ping_handle = thread::spawn(crate::ping::measure_all_regions_ping);
+                    let misc_handle = thread::spawn(crate::api::fetch_misc_data);
                     let api_res = api_handle
                         .join()
                         .unwrap_or_else(|_| Err("API fetch thread error".to_string()));
                     let ping_res = ping_handle.join().unwrap_or_default();
+                    let misc_res = misc_handle
+                        .join()
+                        .unwrap_or_else(|_| Err("Misc fetch thread error".to_string()));
                     tx_refresh
-                        .send(AppEvent::ManualRefreshComplete { api_res, ping_res })
+                        .send(AppEvent::ManualRefreshComplete {
+                            api_res,
+                            ping_res,
+                            misc_res,
+                        })
                         .unwrap_or(());
                 });
             }
@@ -149,10 +169,15 @@ pub fn run_app(
                     AppEvent::Tick => {
                         app.on_tick(std::time::Instant::now());
                     }
-                    AppEvent::ManualRefreshComplete { api_res, ping_res } => {
+                    AppEvent::ManualRefreshComplete {
+                        api_res,
+                        ping_res,
+                        misc_res,
+                    } => {
                         app.handle_manual_refresh_complete(
                             api_res,
                             ping_res,
+                            misc_res,
                             std::time::Instant::now(),
                         );
                     }
@@ -166,6 +191,9 @@ pub fn run_app(
                     }
                     AppEvent::PingUpdate(pings) => {
                         app.handle_ping_update(pings);
+                    }
+                    AppEvent::MiscUpdate(res) => {
+                        app.handle_misc_update(res);
                     }
                 }
 

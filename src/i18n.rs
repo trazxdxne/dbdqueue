@@ -108,6 +108,10 @@ pub enum TextKey {
     SummaryKiller,
     SummarySurvivor,
     SummarySimilar,
+    EventLeft,
+    EventUpcoming,
+    EventStartsIn,
+    EventIn,
 }
 
 pub fn tr(locale: Locale, key: TextKey) -> &'static str {
@@ -156,6 +160,10 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::SummaryKiller => "Killer:",
             TextKey::SummarySurvivor => "Survivor:",
             TextKey::SummarySimilar => "similar",
+            TextKey::EventLeft => "left",
+            TextKey::EventUpcoming => "Upcoming",
+            TextKey::EventStartsIn => "starts",
+            TextKey::EventIn => "in",
         },
         Locale::Ru => match key {
             TextKey::HeaderTitle => " Dead By Queue ",
@@ -201,6 +209,10 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::SummaryKiller => "Маньяк:",
             TextKey::SummarySurvivor => "Выживший:",
             TextKey::SummarySimilar => "похожих",
+            TextKey::EventLeft => "осталось",
+            TextKey::EventUpcoming => "Ожидается",
+            TextKey::EventStartsIn => "начало",
+            TextKey::EventIn => "через",
         },
     }
 }

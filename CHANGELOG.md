@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-09-18
+
+### Added
+- In-game event integration via deadbyqueue.com `/misc` API endpoint (`currentEvents` and `upcomingEvents`).
+- Inline event badge in top header displayed next to `Mode: Event` (`[<Name> - <countdown> left]`, e.g. `[2v8 event - 11d left]`), visible only when Event mode is active.
+- Event countdown timer formatting adhering to active `Time` toggle (`Exact` vs `~Rounded`).
+- Local machine timezone conversion (`chrono::Local`) for all event dates and timestamps.
+- Upcoming event placeholder in Event mode table when no active queues are running (`Upcoming: <Name> (starts <Date> - in <countdown>)`).
+- Background auto-refresh worker (60s loop) and manual refresh (`[R]`) integration for event data.
+- English and Russian translations for all event strings and badges.
+
 ## [0.7.0] - 2026-09-16
 
 ### Added
