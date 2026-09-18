@@ -1,5 +1,6 @@
 mod api;
 mod app;
+mod cache;
 mod config;
 mod hosts;
 mod i18n;
@@ -124,6 +125,10 @@ fn main() {
         config.lang,
         config.api_url,
     );
+
+    let cache_path = cache::get_cache_path(&config_path);
+    let ping_cache = cache::load_ping_cache(&cache_path);
+    app.pings = ping_cache.pings;
 
     // Initial fetch to show data immediately
     if let Ok((mut queues, updated)) = api::fetch_queue_times() {

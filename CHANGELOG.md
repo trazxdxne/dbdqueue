@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-09-18
+
+### Added
+- Persistent region ping caching: AWS ping measurements are cached in `cache.json` in the user configuration directory (`%APPDATA%\dbdqueue` or `~/.config/dbdqueue`).
+- Instant startup: ping cache is loaded immediately on launch, allowing the Best Pick summary and region pings to display on the very first frame without the ~3-second delay.
+- Stale-while-revalidate background updates: live ping measurements continue in the background and silently update values when ready.
+- Timeout-resilient ping merging: retains previously known pings if an individual AWS region times out or drops packets during background checks.
+- Accelerated region locker: `dbdq lock` interactive CLI menu loads cached pings directly, opening immediately without waiting for ping checks.
+
+### Changed
+- Refined ping update handlers (`handle_ping_update` and `handle_manual_refresh_complete`) to merge results incrementally rather than overwriting.
+
 ## [0.8.1] - 2026-09-18
 
 ### Fixed

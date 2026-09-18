@@ -505,7 +505,9 @@ impl App {
     ) {
         self.handle_misc_update(misc_res);
         self.is_fetching = false;
-        self.pings = ping_res;
+        for (reg, ms) in ping_res {
+            self.pings.insert(reg, ms);
+        }
         match api_res {
             Ok((mut queues, last_updated)) => {
                 for q in &mut queues {
@@ -556,7 +558,9 @@ impl App {
     }
 
     pub fn handle_ping_update(&mut self, pings: HashMap<String, u32>) {
-        self.pings = pings;
+        for (reg, ms) in pings {
+            self.pings.insert(reg, ms);
+        }
     }
 
     pub fn handle_misc_update(&mut self, res: Result<api::MiscResponse, String>) {
@@ -1258,5 +1262,47 @@ mod tests {
         app.handle_misc_update(Err("network error".to_string()));
         assert!(app.current_event.is_some());
         assert_eq!(app.current_event.as_ref().unwrap().name, "old event");
+    }
+
+    #[test]
+    fn test_handle_ping_update_merges_and_preserves_existing() {
+        let mut app = make_test_app();
+        app.pings.insert("eu-central-1".to_string(), 35);
+        app.pings.insert("us-east-1".to_string(), 105);
+
+        // Update with only eu-central-1 changed, us-east-1 not present (e.g. timed out)
+        let mut update = HashMap::new();
+        update.insert("eu-central-1".to_string(), 40);
+        update.insert("ap-northeast-1".to_string(), 220);
+        app.handle_ping_update(update);
+
+        assert_eq!(app.pings.get("eu-central-1"), Some(&40));
+        assert_eq!(app.pings.get("us-east-1"), Some(&105)); // Preserved!
+        assert_eq!(app.pings.get("ap-northeast-1"), Some(&220));
+    }
+
+    #[test]
+    fn test_disabled_region_masked_even_with_cached_ping() {
+        let mut app = make_test_app();
+        // Frankfurt is disabled by devs (queue time = "—")
+        app.queues = vec![
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "—", "—"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "15s", "15s"),
+        ];
+        // Both have cached pings
+        app.pings.insert("eu-central-1".to_string(), 10);
+        app.pings.insert("eu-west-1".to_string(), 50);
+
+        let summary = app.summary();
+        let killer_pick = summary.killer.expect("killer pick should be present");
+        // Must pick Dublin, ignoring Frankfurt completely even though Frankfurt has lower ping
+        assert_eq!(killer_pick.row.name, "Dublin");
+
+        // And sort order Ping must place disabled at bottom
+        app.sort = SortOrder::Ping;
+        let rows = app.get_filtered_sorted_rows();
+        assert_eq!(rows[0].name, "Dublin");
+        assert_eq!(rows[1].name, "Frankfurt");
+        assert!(rows[1].is_disabled());
     }
 }

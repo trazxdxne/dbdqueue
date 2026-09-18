@@ -36,6 +36,8 @@ pub fn run_app(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    let cache_path = crate::cache::get_cache_path(&config_path);
+
     let (tx, rx) = mpsc::channel();
     let tick_rate = Duration::from_millis(250);
 
@@ -180,6 +182,7 @@ pub fn run_app(
                             misc_res,
                             std::time::Instant::now(),
                         );
+                        let _ = crate::cache::save_ping_cache(&cache_path, &app.pings);
                     }
                     AppEvent::HostsUpdateComplete { result, locked } => {
                         let action =
@@ -191,6 +194,7 @@ pub fn run_app(
                     }
                     AppEvent::PingUpdate(pings) => {
                         app.handle_ping_update(pings);
+                        let _ = crate::cache::save_ping_cache(&cache_path, &app.pings);
                     }
                     AppEvent::MiscUpdate(res) => {
                         app.handle_misc_update(res);
