@@ -47,8 +47,8 @@ pub fn save_ping_cache(
     }
     current.updated_at = chrono::Utc::now().timestamp().max(0) as u64;
 
-    let json_str = serde_json::to_string_pretty(&current)
-        .map_err(|e| std::io::Error::other(e.to_string()))?;
+    let json_str =
+        serde_json::to_string_pretty(&current).map_err(|e| std::io::Error::other(e.to_string()))?;
     fs::write(path, json_str)?;
     Ok(())
 }
@@ -115,7 +115,8 @@ mod tests {
 
     #[test]
     fn test_startup_loads_cached_ping_and_computes_best_pick_immediately() {
-        let temp_dir = std::env::temp_dir().join(format!("dbdq_startup_test_{}", std::process::id()));
+        let temp_dir =
+            std::env::temp_dir().join(format!("dbdq_startup_test_{}", std::process::id()));
         let cache_path = temp_dir.join("cache.json");
 
         let mut pings = HashMap::new();
