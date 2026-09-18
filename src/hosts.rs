@@ -385,7 +385,16 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     let queues = crate::api::fetch_queue_times()
         .map(|(q, _)| q)
         .unwrap_or_default();
-    let pings = crate::ping::measure_all_regions_ping();
+    let config_path = crate::config::get_config_path();
+    let cache_path = crate::cache::get_cache_path(&config_path);
+    let cached = crate::cache::load_ping_cache(&cache_path);
+    let pings = if !cached.pings.is_empty() {
+        cached.pings
+    } else {
+        let measured = crate::ping::measure_all_regions_ping();
+        let _ = crate::cache::save_ping_cache(&cache_path, &measured);
+        measured
+    };
 
     let lang = if is_ru {
         crate::config::Language::Ru
