@@ -1053,5 +1053,21 @@ mod tests {
             .collect();
         assert!(header_line_event.contains("Mode: Event [2v8 event - 11d left]"));
         assert!(header_line_event.contains("│  Time: ~Rounded"));
+
+        // 3. Rounding check: 10d 23h should round to 11d instead of truncating to 10d
+        app.current_event = Some(api::EventItem {
+            name: "2v8 event".to_string(),
+            start: "1000".to_string(),
+            end: format!(
+                "{}",
+                chrono::Local::now().timestamp() + 10 * 86400 + 23 * 3600
+            ),
+        });
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer3 = terminal.backend().buffer();
+        let header_line_rounded: String = (0..100)
+            .map(|x| buffer3[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(header_line_rounded.contains("Mode: Event [2v8 event - 11d left]"));
     }
 }

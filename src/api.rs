@@ -470,14 +470,25 @@ pub fn format_event_countdown(remaining_secs: u64, format: TimeFormat) -> String
             }
         }
         TimeFormat::Rounded => {
-            if days >= 1 {
-                format!("{}d", days)
+            if remaining_secs >= 86400 {
+                let rounded_days = (remaining_secs + 43200) / 86400;
+                format!("{}d", rounded_days)
             } else if remaining_secs >= 3600 {
-                format!("{}h", hours)
+                let rounded_hours = (remaining_secs + 1800) / 3600;
+                if rounded_hours >= 24 {
+                    "1d".to_string()
+                } else {
+                    format!("{}h", rounded_hours)
+                }
             } else if remaining_secs >= 60 {
-                format!("{}m", mins)
+                let rounded_mins = (remaining_secs + 30) / 60;
+                if rounded_mins >= 60 {
+                    "1h".to_string()
+                } else {
+                    format!("{}m", rounded_mins)
+                }
             } else {
-                format!("{}s", secs)
+                format!("{}s", remaining_secs)
             }
         }
     }
@@ -808,12 +819,42 @@ mod tests {
         // >= 1 day: "Xd"
         assert_eq!(format_event_countdown(90000, TimeFormat::Rounded), "1d");
         assert_eq!(format_event_countdown(172800, TimeFormat::Rounded), "2d");
+        // 10d 23h rounds up to 11d
+        assert_eq!(
+            format_event_countdown(10 * 86400 + 23 * 3600, TimeFormat::Rounded),
+            "11d"
+        );
+        // 10d 5h rounds to 10d
+        assert_eq!(
+            format_event_countdown(10 * 86400 + 5 * 3600, TimeFormat::Rounded),
+            "10d"
+        );
         // >= 1 hour, < 1 day: "Xh"
         assert_eq!(format_event_countdown(7200, TimeFormat::Rounded), "2h");
         assert_eq!(format_event_countdown(3600, TimeFormat::Rounded), "1h");
+        // 23h 50m rounds up to 1d
+        assert_eq!(
+            format_event_countdown(23 * 3600 + 50 * 60, TimeFormat::Rounded),
+            "1d"
+        );
+        // 23h 10m rounds to 23h
+        assert_eq!(
+            format_event_countdown(23 * 3600 + 10 * 60, TimeFormat::Rounded),
+            "23h"
+        );
         // >= 1 min, < 1 hour: "Xm"
         assert_eq!(format_event_countdown(120, TimeFormat::Rounded), "2m");
         assert_eq!(format_event_countdown(60, TimeFormat::Rounded), "1m");
+        // 59m 50s rounds up to 1h
+        assert_eq!(
+            format_event_countdown(59 * 60 + 50, TimeFormat::Rounded),
+            "1h"
+        );
+        // 59m 10s rounds to 59m
+        assert_eq!(
+            format_event_countdown(59 * 60 + 10, TimeFormat::Rounded),
+            "59m"
+        );
         // < 1 min: "Xs"
         assert_eq!(format_event_countdown(45, TimeFormat::Rounded), "45s");
         assert_eq!(format_event_countdown(0, TimeFormat::Rounded), "0s");
