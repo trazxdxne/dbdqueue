@@ -89,6 +89,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires live AWS network access"]
     fn test_all_regions_ping() {
         let pings = measure_all_regions_ping();
         for (reg, ms) in &pings {
