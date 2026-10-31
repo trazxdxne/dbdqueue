@@ -1,9 +1,5 @@
 use crate::api::get_all_aws_regions;
-use crossterm::{
-    cursor,
-    event::{self, Event, KeyCode, KeyModifiers},
-    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
-};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs;
 use std::io;
@@ -472,9 +468,9 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     app.pings = pings;
     app.open_lock_modal();
 
-    enable_raw_mode().ok()?;
-    let mut stdout = io::stdout();
-    crossterm::execute!(stdout, EnterAlternateScreen, cursor::Hide).ok()?;
+    crate::tui::install_panic_hook();
+    let _guard = crate::tui::TerminalGuard::enter().ok()?;
+    let stdout = io::stdout();
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).ok()?;
 
@@ -485,6 +481,7 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
 
     let mut applied = false;
     let mut cancelled = false;
+    let theme = crate::ui::Theme::new();
 
     loop {
         terminal
@@ -494,7 +491,7 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
                 } else {
                     crate::ui::centered_rect(70, 80, f.area())
                 };
-                crate::ui::draw_lock_modal(f, &app, modal_area);
+                crate::ui::draw_lock_modal(f, &app, &theme, modal_area);
             })
             .ok();
 
@@ -510,14 +507,38 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
                     KeyCode::Down | KeyCode::Char('j') => {
                         app.lock_modal_down();
                     }
+                    KeyCode::Home => {
+                        app.handle_home();
+                    }
+                    KeyCode::End => {
+                        app.handle_end();
+                    }
+                    KeyCode::PageUp => {
+                        app.handle_page_up();
+                    }
+                    KeyCode::PageDown => {
+                        app.handle_page_down();
+                    }
                     KeyCode::Char(' ') => {
                         app.lock_modal_toggle();
+                    }
+                    KeyCode::Char('a')
+                    | KeyCode::Char('A')
+                    | KeyCode::Char('ф')
+                    | KeyCode::Char('Ф') => {
+                        app.lock_modal_select_all();
+                    }
+                    KeyCode::Char('i')
+                    | KeyCode::Char('I')
+                    | KeyCode::Char('ш')
+                    | KeyCode::Char('Ш') => {
+                        app.lock_modal_invert();
                     }
                     KeyCode::Enter => {
                         applied = true;
                         break;
                     }
-                    KeyCode::Esc | KeyCode::Char('q') => {
+                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('й') => {
                         cancelled = true;
                         break;
                     }
@@ -535,8 +556,7 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
         }
     }
 
-    disable_raw_mode().ok();
-    crossterm::execute!(terminal.backend_mut(), LeaveAlternateScreen, cursor::Show).ok();
+    drop(_guard);
 
     if cancelled || !applied {
         let cancel_msg = if is_ru {

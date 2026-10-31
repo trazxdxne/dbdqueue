@@ -97,6 +97,8 @@ pub enum Direction {
     Down,
 }
 
+pub const PAGE_STEP: usize = 5;
+
 pub const SIMILAR_PING_TOLERANCE_MS: u32 = 25;
 pub const SIMILAR_TIME_TOLERANCE_SECS: u32 = 15;
 
@@ -248,23 +250,29 @@ impl App {
             return;
         }
         let i = match self.table_state.selected() {
-            Some(i) => match direction {
-                Direction::Down => {
-                    if i >= total.saturating_sub(1) {
-                        0
-                    } else {
-                        i + 1
+            Some(i) => {
+                let clamped_i = i.min(total.saturating_sub(1));
+                match direction {
+                    Direction::Down => {
+                        if clamped_i >= total.saturating_sub(1) {
+                            0
+                        } else {
+                            clamped_i + 1
+                        }
+                    }
+                    Direction::Up => {
+                        if clamped_i == 0 {
+                            total.saturating_sub(1)
+                        } else {
+                            clamped_i - 1
+                        }
                     }
                 }
-                Direction::Up => {
-                    if i == 0 {
-                        total.saturating_sub(1)
-                    } else {
-                        i - 1
-                    }
-                }
+            }
+            None => match direction {
+                Direction::Down => 0,
+                Direction::Up => total.saturating_sub(1),
             },
-            None => 0,
         };
         self.table_state.select(Some(i));
     }
@@ -275,6 +283,51 @@ impl App {
 
     pub fn previous(&mut self) {
         self.move_selection(Direction::Up);
+    }
+
+    pub fn select_first(&mut self) {
+        let total = self.get_filtered_sorted_rows().len();
+        if total > 0 {
+            self.table_state.select(Some(0));
+        } else {
+            self.table_state.select(None);
+        }
+    }
+
+    pub fn select_last(&mut self) {
+        let total = self.get_filtered_sorted_rows().len();
+        if total > 0 {
+            self.table_state.select(Some(total.saturating_sub(1)));
+        } else {
+            self.table_state.select(None);
+        }
+    }
+
+    pub fn select_page_up(&mut self) {
+        let total = self.get_filtered_sorted_rows().len();
+        if total == 0 {
+            self.table_state.select(None);
+            return;
+        }
+        let cur = self
+            .table_state
+            .selected()
+            .unwrap_or(0)
+            .min(total.saturating_sub(1));
+        let next = cur.saturating_sub(PAGE_STEP);
+        self.table_state.select(Some(next));
+    }
+
+    pub fn select_page_down(&mut self) {
+        let total = self.get_filtered_sorted_rows().len();
+        if total == 0 {
+            self.table_state.select(None);
+            return;
+        }
+        let max_idx = total.saturating_sub(1);
+        let cur = self.table_state.selected().unwrap_or(0).min(max_idx);
+        let next = (cur + PAGE_STEP).min(max_idx);
+        self.table_state.select(Some(next));
     }
 
     pub fn clamp_selection(&mut self) {
@@ -351,6 +404,62 @@ impl App {
         self.move_modal_cursor(Direction::Down);
     }
 
+    pub fn lock_modal_home(&mut self) {
+        self.lock_modal_cursor = 0;
+    }
+
+    pub fn lock_modal_end(&mut self) {
+        let modal_total = self.get_modal_regions().len();
+        if modal_total > 0 {
+            self.lock_modal_cursor = modal_total.saturating_sub(1);
+        } else {
+            self.lock_modal_cursor = 0;
+        }
+    }
+
+    pub fn lock_modal_page_up(&mut self) {
+        self.lock_modal_cursor = self.lock_modal_cursor.saturating_sub(PAGE_STEP);
+    }
+
+    pub fn lock_modal_page_down(&mut self) {
+        let modal_total = self.get_modal_regions().len();
+        if modal_total > 0 {
+            self.lock_modal_cursor =
+                (self.lock_modal_cursor + PAGE_STEP).min(modal_total.saturating_sub(1));
+        } else {
+            self.lock_modal_cursor = 0;
+        }
+    }
+
+    pub fn lock_modal_select_all(&mut self) {
+        let regions = self.get_modal_regions();
+        if regions.is_empty() {
+            return;
+        }
+        let all_selected = regions
+            .iter()
+            .all(|r| self.lock_modal_selected.iter().any(|s| s == *r));
+        if all_selected {
+            self.lock_modal_selected.clear();
+        } else {
+            self.lock_modal_selected = regions.iter().map(|r| r.to_string()).collect();
+            self.lock_modal_selected.sort();
+        }
+    }
+
+    pub fn lock_modal_invert(&mut self) {
+        let regions = self.get_modal_regions();
+        let mut inverted = Vec::new();
+        for r in regions {
+            let r_str = r.to_string();
+            if !self.lock_modal_selected.contains(&r_str) {
+                inverted.push(r_str);
+            }
+        }
+        inverted.sort();
+        self.lock_modal_selected = inverted;
+    }
+
     pub fn lock_modal_toggle(&mut self) {
         let regions = self.get_modal_regions();
         if let Some(code) = regions.get(self.lock_modal_cursor) {
@@ -394,14 +503,33 @@ impl App {
     pub fn handle_key(&mut self, c: char) -> AppAction {
         let norm = normalize_key_char(c);
         if self.show_lock_modal {
-            if norm == ' ' {
-                self.lock_modal_toggle();
+            match norm {
+                ' ' => self.lock_modal_toggle(),
+                'a' => self.lock_modal_select_all(),
+                'i' => self.lock_modal_invert(),
+                'j' => self.lock_modal_down(),
+                'k' => self.lock_modal_up(),
+                'q' => self.cancel_lock_modal(),
+                _ => {}
             }
             AppAction::None
         } else {
             match norm {
+                'j' => {
+                    self.next();
+                    AppAction::None
+                }
+                'k' => {
+                    self.previous();
+                    AppAction::None
+                }
+                'q' => {
+                    self.should_quit = true;
+                    AppAction::None
+                }
                 's' => {
                     self.cycle_sort();
+                    self.clamp_selection();
                     AppAction::SaveConfig(self.to_config())
                 }
                 'l' => {
@@ -444,6 +572,38 @@ impl App {
             self.lock_modal_down();
         } else {
             self.next();
+        }
+    }
+
+    pub fn handle_home(&mut self) {
+        if self.show_lock_modal {
+            self.lock_modal_home();
+        } else {
+            self.select_first();
+        }
+    }
+
+    pub fn handle_end(&mut self) {
+        if self.show_lock_modal {
+            self.lock_modal_end();
+        } else {
+            self.select_last();
+        }
+    }
+
+    pub fn handle_page_up(&mut self) {
+        if self.show_lock_modal {
+            self.lock_modal_page_up();
+        } else {
+            self.select_page_up();
+        }
+    }
+
+    pub fn handle_page_down(&mut self) {
+        if self.show_lock_modal {
+            self.lock_modal_page_down();
+        } else {
+            self.select_page_down();
         }
     }
 
@@ -1304,5 +1464,140 @@ mod tests {
         assert_eq!(rows[0].name, "Dublin");
         assert_eq!(rows[1].name, "Frankfurt");
         assert!(rows[1].is_disabled());
+    }
+
+    #[test]
+    fn test_vim_keys_table_navigation() {
+        let mut app = make_test_app();
+        app.queues = vec![
+            RegionQueueData::new("[US]", "Virginia", "Standard", "5s", "10s"),
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "5s", "10s"),
+            RegionQueueData::new("[IE]", "Dublin", "Standard", "5s", "10s"),
+        ];
+
+        // Start at 0
+        app.table_state.select(Some(0));
+        app.handle_key('j');
+        assert_eq!(app.table_state.selected(), Some(1));
+        app.handle_key('j');
+        assert_eq!(app.table_state.selected(), Some(2));
+        // Wrap to 0
+        app.handle_key('j');
+        assert_eq!(app.table_state.selected(), Some(0));
+
+        // 'k' moves up, wraps to 2
+        app.handle_key('k');
+        assert_eq!(app.table_state.selected(), Some(2));
+        app.handle_key('k');
+        assert_eq!(app.table_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn test_home_end_page_up_down_table() {
+        let mut app = make_test_app();
+        for i in 0..12 {
+            app.queues.push(RegionQueueData::new(
+                "[US]",
+                format!("Region-{}", i),
+                "Standard",
+                "5s",
+                "10s",
+            ));
+        }
+
+        app.table_state.select(Some(5));
+        app.handle_home();
+        assert_eq!(app.table_state.selected(), Some(0));
+
+        app.handle_end();
+        assert_eq!(app.table_state.selected(), Some(11));
+
+        app.handle_page_up();
+        assert_eq!(app.table_state.selected(), Some(6));
+
+        app.handle_page_down();
+        assert_eq!(app.table_state.selected(), Some(11));
+    }
+
+    #[test]
+    fn test_quit_ladder_main_and_modal() {
+        let mut app = make_test_app();
+
+        // On main screen: 'q' quits
+        assert!(!app.should_quit);
+        app.handle_key('q');
+        assert!(app.should_quit);
+
+        // Reset
+        app.should_quit = false;
+        app.handle_esc();
+        assert!(app.should_quit);
+
+        // In lock modal: 'q' cancels modal, does NOT quit app
+        app.should_quit = false;
+        app.open_lock_modal();
+        assert!(app.show_lock_modal);
+        app.handle_key('q');
+        assert!(!app.show_lock_modal);
+        assert!(!app.should_quit);
+
+        // In lock modal: Esc cancels modal, does NOT quit app
+        app.open_lock_modal();
+        assert!(app.show_lock_modal);
+        app.handle_esc();
+        assert!(!app.show_lock_modal);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn test_lock_modal_select_all_and_invert() {
+        let mut app = make_test_app();
+        app.queues = vec![
+            RegionQueueData::new("[DE]", "Frankfurt", "Standard", "5s", "10s"),
+            RegionQueueData::new("[US]", "Virginia", "Standard", "5s", "10s"),
+        ];
+        app.open_lock_modal();
+        let modal_regions = app.get_modal_regions();
+        assert!(modal_regions.len() >= 2);
+
+        // Select All ('a')
+        app.handle_key('a');
+        assert_eq!(app.lock_modal_selected.len(), modal_regions.len());
+
+        // Pressing 'a' again deselects all
+        app.handle_key('a');
+        assert!(app.lock_modal_selected.is_empty());
+
+        // Select one, then invert ('i')
+        app.handle_key(' '); // toggle first
+        assert_eq!(app.lock_modal_selected.len(), 1);
+        app.handle_key('i');
+        assert_eq!(app.lock_modal_selected.len(), modal_regions.len() - 1);
+    }
+
+    #[test]
+    fn test_modal_navigation_and_clamping() {
+        let mut app = make_test_app();
+        app.open_lock_modal();
+        let total = app.get_modal_regions().len();
+        assert!(total > 0);
+
+        app.handle_key('j');
+        assert_eq!(app.lock_modal_cursor, 1);
+
+        app.handle_key('k');
+        assert_eq!(app.lock_modal_cursor, 0);
+
+        app.handle_end();
+        assert_eq!(app.lock_modal_cursor, total - 1);
+
+        app.handle_home();
+        assert_eq!(app.lock_modal_cursor, 0);
+
+        app.handle_page_down();
+        assert_eq!(app.lock_modal_cursor, PAGE_STEP.min(total - 1));
+
+        app.handle_page_up();
+        assert_eq!(app.lock_modal_cursor, 0);
     }
 }

@@ -1,17 +1,77 @@
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    cursor,
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{Terminal, backend::CrosstermBackend};
+use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::Once;
 use std::sync::mpsc;
 use std::thread;
-use std::{io, time::Duration};
+use std::time::Duration;
+
+static PANIC_HOOK_ONCE: Once = Once::new();
+
+/// Unconditionally resets raw mode, leaves alternate screen, disables mouse capture,
+/// and restores cursor visibility safely without panicking.
+pub fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        DisableMouseCapture,
+        cursor::Show
+    );
+    let _ = io::stdout().flush();
+}
+
+/// Installs a panic hook that resets the terminal state before delegating
+/// to the previous panic hook.
+pub fn install_panic_hook() {
+    PANIC_HOOK_ONCE.call_once(|| {
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |panic_info| {
+            restore_terminal();
+            previous_hook(panic_info);
+        }));
+    });
+}
+
+/// RAII guard ensuring the terminal is restored to normal cooked mode on drop.
+pub struct TerminalGuard;
+
+impl TerminalGuard {
+    /// Enters raw mode, switches to alternate screen, enables mouse capture,
+    /// and hides the cursor.
+    pub fn enter() -> io::Result<Self> {
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        if let Err(err) = execute!(
+            stdout,
+            EnterAlternateScreen,
+            EnableMouseCapture,
+            cursor::Hide
+        ) {
+            let _ = disable_raw_mode();
+            return Err(err);
+        }
+        Ok(Self)
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        restore_terminal();
+    }
+}
 
 pub enum AppEvent {
-    Input(KeyCode),
+    Input(KeyEvent),
     Tick,
+    #[allow(dead_code)]
+    Resize(u16, u16),
     ApiUpdate(Result<(Vec<crate::api::RegionQueueData>, i64), String>),
     PingUpdate(std::collections::HashMap<String, u32>),
     MiscUpdate(Result<crate::api::MiscResponse, String>),
@@ -30,10 +90,10 @@ pub fn run_app(
     mut app: crate::app::App,
     config_path: PathBuf,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend = CrosstermBackend::new(stdout);
+    install_panic_hook();
+    let _guard = TerminalGuard::enter()?;
+
+    let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
     let cache_path = crate::cache::get_cache_path(&config_path);
@@ -50,12 +110,20 @@ pub fn run_app(
                 .checked_sub(last_tick.elapsed())
                 .unwrap_or_else(|| Duration::from_secs(0));
 
-            if event::poll(timeout).unwrap_or(false)
-                && let Ok(Event::Key(key)) = event::read()
-                && (key.kind == crossterm::event::KeyEventKind::Press
-                    || key.kind == crossterm::event::KeyEventKind::Repeat)
-            {
-                tx_input.send(AppEvent::Input(key.code)).unwrap_or(());
+            if event::poll(timeout).unwrap_or(false) {
+                match event::read() {
+                    Ok(Event::Key(key)) => {
+                        if key.kind == crossterm::event::KeyEventKind::Press
+                            || key.kind == crossterm::event::KeyEventKind::Repeat
+                        {
+                            tx_input.send(AppEvent::Input(key)).unwrap_or(());
+                        }
+                    }
+                    Ok(Event::Resize(w, h)) => {
+                        tx_input.send(AppEvent::Resize(w, h)).unwrap_or(());
+                    }
+                    _ => {}
+                }
             }
 
             if last_tick.elapsed() >= tick_rate {
@@ -154,22 +222,38 @@ pub fn run_app(
         if let Ok(mut event) = rx.recv() {
             loop {
                 match event {
-                    AppEvent::Input(key) => match key {
-                        KeyCode::Char(c) => {
-                            let action = app.handle_key(c);
-                            dispatch_action(action, &mut app, &tx);
+                    AppEvent::Input(key) => {
+                        if key.modifiers.contains(KeyModifiers::CONTROL)
+                            && (key.code == KeyCode::Char('c') || key.code == KeyCode::Char('C'))
+                        {
+                            app.should_quit = true;
+                            break;
                         }
-                        KeyCode::Up => app.handle_up(),
-                        KeyCode::Down => app.handle_down(),
-                        KeyCode::Enter => {
-                            let action = app.handle_enter();
-                            dispatch_action(action, &mut app, &tx);
+
+                        match key.code {
+                            KeyCode::Char(c) => {
+                                let action = app.handle_key(c);
+                                dispatch_action(action, &mut app, &tx);
+                            }
+                            KeyCode::Up => app.handle_up(),
+                            KeyCode::Down => app.handle_down(),
+                            KeyCode::Home => app.handle_home(),
+                            KeyCode::End => app.handle_end(),
+                            KeyCode::PageUp => app.handle_page_up(),
+                            KeyCode::PageDown => app.handle_page_down(),
+                            KeyCode::Enter => {
+                                let action = app.handle_enter();
+                                dispatch_action(action, &mut app, &tx);
+                            }
+                            KeyCode::Esc => app.handle_esc(),
+                            _ => {}
                         }
-                        KeyCode::Esc => app.handle_esc(),
-                        _ => {}
-                    },
+                    }
                     AppEvent::Tick => {
                         app.on_tick(std::time::Instant::now());
+                    }
+                    AppEvent::Resize(_, _) => {
+                        // Terminal resize triggers redraw at the top of loop
                     }
                     AppEvent::ManualRefreshComplete {
                         api_res,
@@ -217,14 +301,29 @@ pub fn run_app(
         }
     }
 
-    // Restore terminal
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
-
+    drop(_guard);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_restore_terminal_does_not_panic() {
+        restore_terminal();
+    }
+
+    #[test]
+    fn test_terminal_guard_drop_idempotent() {
+        let guard = TerminalGuard;
+        drop(guard);
+        restore_terminal();
+    }
+
+    #[test]
+    fn test_install_panic_hook_idempotent() {
+        install_panic_hook();
+        install_panic_hook();
+    }
 }

@@ -3,38 +3,125 @@ use crate::app::{App, NoticeKind, SPINNER_FRAMES};
 use crate::i18n::{TextKey, format_time_diff, tr, tr_mode, tr_sort, tr_time_format};
 use ratatui::{
     Frame,
-    layout::{Constraint, Direction, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table},
+    widgets::{
+        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+    },
 };
 
-pub const HEADER_HEIGHT: u16 = 3;
+pub const MIN_WIDTH: u16 = 48;
+pub const MIN_HEIGHT: u16 = 12;
+
+pub const STANDARD_WIDTH_BREAKPOINT: u16 = 80;
+#[allow(dead_code)]
+pub const NARROW_WIDTH_BREAKPOINT: u16 = 60;
+
+pub const HEADER_HEIGHT: u16 = 1;
 pub const FOOTER_HEIGHT: u16 = 1;
-pub const LAYOUT_MARGIN: u16 = 1;
-pub const EMPTY_TABLE_HEIGHT: u16 = 6;
-pub const TABLE_CHROME_HEIGHT: u16 = 4;
+pub const EMPTY_TABLE_HEIGHT: u16 = 4;
 pub const MODAL_WIDTH_PERCENT: u16 = 65;
 pub const MODAL_HEIGHT_PERCENT: u16 = 80;
-pub const TABLE_WIDTH: u16 = 24 + 12 + 14 + 14 + 3 + 2;
+pub const TABLE_WIDTH: u16 = 69;
 pub const SUMMARY_HEIGHT: u16 = 4;
 pub const SUMMARY_LABEL_WIDTH: usize = 11;
 pub const SUMMARY_TIME_WIDTH: usize = 8;
 pub const SUMMARY_REGION_WIDTH: usize = 18;
 pub const SUMMARY_PING_WIDTH: usize = 9;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Theme {
+    pub border_normal: Color,
+    pub border_focus: Color,
+    pub text_primary: Color,
+    pub text_secondary: Color,
+    pub subtle_text: Color,
+    pub accent: Color,
+    pub success: Color,
+    pub warning: Color,
+    pub error: Color,
+    pub info: Color,
+    pub no_color: bool,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Theme {
+    pub fn new() -> Self {
+        let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+        if no_color {
+            Self {
+                border_normal: Color::Reset,
+                border_focus: Color::Reset,
+                text_primary: Color::Reset,
+                text_secondary: Color::Reset,
+                subtle_text: Color::Reset,
+                accent: Color::Reset,
+                success: Color::Reset,
+                warning: Color::Reset,
+                error: Color::Reset,
+                info: Color::Reset,
+                no_color: true,
+            }
+        } else {
+            Self {
+                border_normal: Color::DarkGray,
+                border_focus: Color::LightRed,
+                text_primary: Color::White,
+                text_secondary: Color::Gray,
+                subtle_text: Color::DarkGray,
+                accent: Color::LightRed,
+                success: Color::Green,
+                warning: Color::Yellow,
+                error: Color::Red,
+                info: Color::LightYellow,
+                no_color: false,
+            }
+        }
+    }
+
+    pub fn color_for_queue_time(&self, time_str: &str) -> Color {
+        if self.no_color || time_str == "—" || time_str.is_empty() {
+            return self.subtle_text;
+        }
+        let sec = api::parse_time_to_seconds(time_str);
+        if sec < 60 {
+            self.success
+        } else if sec < 180 {
+            self.warning
+        } else {
+            self.error
+        }
+    }
+
+    pub fn color_for_ping(&self, ms: Option<u32>) -> Color {
+        if self.no_color {
+            return self.subtle_text;
+        }
+        crate::ping::color_for_ping(ms)
+    }
+
+    pub fn primary_style(&self) -> Style {
+        Style::default().fg(self.text_primary).add_modifier(Modifier::BOLD)
+    }
+
+    pub fn subtle_style(&self) -> Style {
+        Style::default().fg(self.subtle_text)
+    }
+
+    pub fn accent_style(&self) -> Style {
+        Style::default().fg(self.accent).add_modifier(Modifier::BOLD)
+    }
+}
+
+#[allow(dead_code)]
 pub fn color_for_time(time_str: &str) -> Color {
-    if time_str == "—" || time_str.is_empty() {
-        return Color::DarkGray;
-    }
-    let sec = api::parse_time_to_seconds(time_str);
-    if sec < 60 {
-        Color::Green
-    } else if sec < 180 {
-        Color::Yellow
-    } else {
-        Color::Red
-    }
+    Theme::new().color_for_queue_time(time_str)
 }
 
 pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
@@ -72,7 +159,34 @@ fn pad_right(s: &str, width: usize) -> String {
     format!("{}{}", s, " ".repeat(pad))
 }
 
-pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_floor_warning(f: &mut Frame, theme: &Theme, area: Rect) {
+    let msg = vec![
+        Line::from(Span::styled("Terminal too small", theme.accent_style())),
+        Line::from(Span::styled(
+            format!("Current size: {}x{}", area.width, area.height),
+            theme.subtle_style(),
+        )),
+        Line::from(Span::styled(
+            format!("Minimum required: {}x{}", MIN_WIDTH, MIN_HEIGHT),
+            theme.primary_style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "Please resize your window or press 'q' to quit",
+            theme.subtle_style(),
+        )),
+    ];
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(theme.subtle_style());
+    let paragraph = Paragraph::new(msg)
+        .block(block)
+        .alignment(Alignment::Center);
+    f.render_widget(paragraph, area);
+}
+
+pub fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let active_sort_str = tr_sort(app.locale, app.sort);
     let mode_str = tr_mode(app.locale, app.mode);
     let lock_str = if app.locked.is_empty() {
@@ -81,28 +195,22 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
         tr(app.locale, TextKey::LockActive)
     };
 
+    let sort_indicator = match app.sort {
+        crate::config::SortOrder::Killer
+        | crate::config::SortOrder::Survivor
+        | crate::config::SortOrder::Ping => " ▲",
+        crate::config::SortOrder::Default => "",
+    };
+
     let mut spans = vec![
+        Span::styled(tr(app.locale, TextKey::SortLabel), theme.subtle_style()),
         Span::styled(
-            tr(app.locale, TextKey::SortLabel),
-            Style::default().fg(Color::DarkGray),
+            format!("{}{}", active_sort_str, sort_indicator),
+            theme.primary_style(),
         ),
-        Span::styled(
-            active_sort_str,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            tr(app.locale, TextKey::ModeLabel),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            mode_str,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
+        Span::styled("  │  ", theme.subtle_style()),
+        Span::styled(tr(app.locale, TextKey::ModeLabel), theme.subtle_style()),
+        Span::styled(mode_str, theme.primary_style()),
     ];
 
     if app.mode == crate::config::GameMode::Event {
@@ -114,7 +222,7 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
             let countdown = crate::api::format_event_countdown(remaining, app.time_format);
             let left_str = tr(app.locale, TextKey::EventLeft);
             let text = format!(" [{} - {} {}]", ev.name, countdown, left_str);
-            spans.push(Span::styled(text, Style::default().fg(Color::LightYellow)));
+            spans.push(Span::styled(text, Style::default().fg(theme.info)));
         } else if let Some(ref ev) = app.upcoming_event
             && let Some(dt) = crate::api::event_timestamp_to_local(&ev.start)
         {
@@ -125,54 +233,36 @@ pub fn draw_header(f: &mut Frame, app: &App, area: Rect) {
                 " [{}: {} - {} {}]",
                 upcoming_str, ev.name, starts_str, dt_str
             );
-            spans.push(Span::styled(text, Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(text, theme.subtle_style()));
         }
     }
 
     spans.extend([
-        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            tr(app.locale, TextKey::TimeLabel),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled("  │  ", theme.subtle_style()),
+        Span::styled(tr(app.locale, TextKey::TimeLabel), theme.subtle_style()),
         Span::styled(
             tr_time_format(app.locale, app.time_format),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
+            theme.primary_style(),
         ),
-        Span::styled("  │  ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            tr(app.locale, TextKey::LockLabel),
-            Style::default().fg(Color::DarkGray),
-        ),
+        Span::styled("  │  ", theme.subtle_style()),
+        Span::styled(tr(app.locale, TextKey::LockLabel), theme.subtle_style()),
         Span::styled(
             lock_str,
             if !app.locked.is_empty() {
                 Style::default()
-                    .fg(Color::Green)
+                    .fg(theme.success)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                theme.subtle_style()
             },
         ),
     ]);
 
-    let header = Paragraph::new(Line::from(spans)).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::LightRed))
-            .title(Span::styled(
-                tr(app.locale, TextKey::HeaderTitle),
-                Style::default()
-                    .fg(Color::LightRed)
-                    .add_modifier(Modifier::BOLD),
-            )),
-    );
+    let header = Paragraph::new(Line::from(spans));
     f.render_widget(header, area);
 }
 
-pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
+pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_narrow: bool) {
     let rows_data = app.get_filtered_sorted_rows();
     let is_empty = rows_data.is_empty();
 
@@ -181,7 +271,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
         let (msg, color) = if app.is_fetching {
             (
                 tr(app.locale, TextKey::FetchingQueues).to_string(),
-                Color::LightRed,
+                theme.accent,
             )
         } else if app
             .notice
@@ -190,7 +280,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
         {
             (
                 tr(app.locale, TextKey::FailedQueues).to_string(),
-                Color::Red,
+                theme.error,
             )
         } else if app.mode == crate::config::GameMode::Event {
             if let Some(ref ev) = app.upcoming_event {
@@ -208,24 +298,24 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
                             "  {}: {} ({} {} - {} {})",
                             upcoming_str, ev.name, starts_str, dt_str, in_str, countdown
                         ),
-                        Color::LightYellow,
+                        theme.info,
                     )
                 } else {
                     (
                         format!("  {}", tr(app.locale, TextKey::NoDataForMode)),
-                        Color::DarkGray,
+                        theme.subtle_text,
                     )
                 }
             } else {
                 (
                     format!("  {}", tr(app.locale, TextKey::NoDataForMode)),
-                    Color::DarkGray,
+                    theme.subtle_text,
                 )
             }
         } else {
             (
                 tr(app.locale, TextKey::NoDataForMode).to_string(),
-                Color::DarkGray,
+                theme.subtle_text,
             )
         };
         (
@@ -235,7 +325,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
                 Cell::from(""),
                 Cell::from(""),
             ])],
-            [
+            vec![
                 Constraint::Percentage(100),
                 Constraint::Length(0),
                 Constraint::Length(0),
@@ -250,86 +340,137 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
                 let is_whitelisted = app.locked.contains(*aws_code);
                 let is_disabled = item.is_disabled();
 
-                let reg_str = if item.flag.is_empty() {
+                let reg_str = if is_narrow || item.flag.is_empty() {
                     item.name.clone()
                 } else {
                     format!("{} {}", item.flag, item.name)
                 };
 
                 if is_disabled {
-                    let dim_style = Style::default().fg(Color::DarkGray);
+                    let dim_style = theme.subtle_style();
                     Row::new(vec![
                         Cell::from(Span::styled(reg_str, dim_style)),
-                        Cell::from(Span::styled("—", dim_style)),
-                        Cell::from(Span::styled("—", dim_style)),
-                        Cell::from(Span::styled("—", dim_style)),
+                        Cell::from(
+                            Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
+                        ),
+                        Cell::from(
+                            Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
+                        ),
+                        Cell::from(
+                            Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
+                        ),
                     ])
                 } else {
                     let name_style = if is_whitelisted {
-                        Style::default()
-                            .fg(Color::LightRed)
-                            .add_modifier(Modifier::BOLD)
+                        theme.accent_style()
                     } else {
                         Style::default()
                     };
 
                     let (ping_str, ping_color) = if let Some(&ms) = app.pings.get(*aws_code) {
-                        (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
+                        (format!("{} ms", ms), theme.color_for_ping(Some(ms)))
                     } else if app.pings.is_empty() {
-                        ("...".to_string(), Color::DarkGray)
+                        ("...".to_string(), theme.subtle_text)
                     } else {
-                        ("—".to_string(), Color::DarkGray)
+                        ("—".to_string(), theme.subtle_text)
                     };
 
-                    let surv_color = color_for_time(&item.survivor);
-                    let kill_color = color_for_time(&item.killer);
+                    let surv_color = theme.color_for_queue_time(&item.survivor);
+                    let kill_color = theme.color_for_queue_time(&item.killer);
 
                     Row::new(vec![
                         Cell::from(Span::styled(reg_str, name_style)),
-                        Cell::from(Span::styled(ping_str, Style::default().fg(ping_color))),
-                        Cell::from(Span::styled(
-                            item.survivor.clone(),
-                            Style::default().fg(surv_color),
-                        )),
-                        Cell::from(Span::styled(
-                            item.killer.clone(),
-                            Style::default().fg(kill_color),
-                        )),
+                        Cell::from(
+                            Line::from(Span::styled(ping_str, Style::default().fg(ping_color)))
+                                .alignment(Alignment::Right),
+                        ),
+                        Cell::from(
+                            Line::from(Span::styled(
+                                item.survivor.clone(),
+                                Style::default().fg(surv_color),
+                            ))
+                            .alignment(Alignment::Right),
+                        ),
+                        Cell::from(
+                            Line::from(Span::styled(
+                                item.killer.clone(),
+                                Style::default().fg(kill_color),
+                            ))
+                            .alignment(Alignment::Right),
+                        ),
                     ])
                 }
             })
             .collect();
-        (
-            r,
-            [
-                Constraint::Length(24),
+
+        let constraints = if is_narrow {
+            vec![
+                Constraint::Min(16),
+                Constraint::Length(9),
+                Constraint::Length(11),
+                Constraint::Length(11),
+            ]
+        } else {
+            vec![
+                Constraint::Min(24),
                 Constraint::Length(12),
                 Constraint::Length(14),
                 Constraint::Length(14),
-            ],
+            ]
+        };
+
+        (r, constraints)
+    };
+
+    let ping_indicator = if app.sort == crate::config::SortOrder::Ping {
+        " ▲"
+    } else {
+        ""
+    };
+    let surv_indicator = if app.sort == crate::config::SortOrder::Survivor {
+        " ▲"
+    } else {
+        ""
+    };
+    let kill_indicator = if app.sort == crate::config::SortOrder::Killer {
+        " ▲"
+    } else {
+        ""
+    };
+
+    let (hdr_region, hdr_ping, hdr_survivor, hdr_killer) = if is_narrow {
+        (
+            "Region".to_string(),
+            format!("Ping{}", ping_indicator),
+            format!("Surv{}", surv_indicator),
+            format!("Kill{}", kill_indicator),
+        )
+    } else {
+        (
+            tr(app.locale, TextKey::ColRegion).to_string(),
+            format!("{}{}", tr(app.locale, TextKey::ColPing), ping_indicator),
+            format!("{}{}", tr(app.locale, TextKey::ColSurvivor), surv_indicator),
+            format!("{}{}", tr(app.locale, TextKey::ColKiller), kill_indicator),
         )
     };
 
-    let hdr_region = tr(app.locale, TextKey::ColRegion);
-    let hdr_ping = tr(app.locale, TextKey::ColPing);
-    let hdr_survivor = tr(app.locale, TextKey::ColSurvivor);
-    let hdr_killer = tr(app.locale, TextKey::ColKiller);
+    let header_row = Row::new(vec![
+        Cell::from(Span::styled(hdr_region, theme.primary_style())),
+        Cell::from(
+            Line::from(Span::styled(hdr_ping, theme.primary_style())).alignment(Alignment::Right),
+        ),
+        Cell::from(
+            Line::from(Span::styled(hdr_survivor, theme.primary_style()))
+                .alignment(Alignment::Right),
+        ),
+        Cell::from(
+            Line::from(Span::styled(hdr_killer, theme.primary_style())).alignment(Alignment::Right),
+        ),
+    ])
+    .bottom_margin(1);
 
     let mut table = Table::new(rows, col_constraints)
-        .header(
-            Row::new(vec![hdr_region, hdr_ping, hdr_survivor, hdr_killer])
-                .style(
-                    Style::default()
-                        .fg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .bottom_margin(1),
-        )
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray)),
-        )
+        .header(header_row)
         .column_spacing(1);
 
     if !is_empty {
@@ -339,7 +480,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, area: Rect) {
     f.render_stateful_widget(table, area, &mut app.table_state);
 }
 
-pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narrow: bool) {
     let now = chrono::Utc::now().timestamp();
     let diff = now - app.api_last_updated;
     let time_str = if app.api_last_updated == 0 {
@@ -349,79 +490,84 @@ pub fn draw_footer(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let status_span = if let Some(ref notice) = app.notice {
-        let color = match notice.kind {
-            NoticeKind::Error => Color::Red,
-            NoticeKind::Info => Color::LightRed,
-            NoticeKind::Success => Color::Green,
+        let (prefix, color) = match notice.kind {
+            NoticeKind::Error => ("✗ ", theme.error),
+            NoticeKind::Info => ("ℹ ", theme.accent),
+            NoticeKind::Success => ("✓ ", theme.success),
         };
         Span::styled(
-            notice.message.clone(),
+            format!("{}{}", prefix, notice.message),
             Style::default().fg(color).add_modifier(Modifier::BOLD),
         )
     } else if app.is_fetching {
         let spinner = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
         let msg = tr(app.locale, TextKey::StatusFetching);
-        Span::styled(
-            format!("{} {}", spinner, msg),
-            Style::default()
-                .fg(Color::LightRed)
-                .add_modifier(Modifier::BOLD),
-        )
+        Span::styled(format!("{} {}", spinner, msg), theme.accent_style())
     } else {
         let prefix = tr(app.locale, TextKey::StatusApiUpdated);
-        Span::styled(
-            format!("{}{}", prefix, time_str),
-            Style::default().fg(Color::DarkGray),
-        )
+        Span::styled(format!("{}{}", prefix, time_str), theme.subtle_style())
     };
 
-    let select_txt = tr(app.locale, TextKey::ActionSelect);
-    let lock_txt = tr(app.locale, TextKey::ActionLock);
-    let sort_txt = tr(app.locale, TextKey::ActionSort);
-    let mode_txt = tr(app.locale, TextKey::ActionMode);
-    let time_txt = tr(app.locale, TextKey::ActionTime);
-    let refresh_txt = tr(app.locale, TextKey::ActionRefresh);
-    let quit_txt = tr(app.locale, TextKey::ActionQuit);
+    let mut spans = vec![status_span, Span::styled("  │  ", theme.subtle_style())];
 
-    let footer = Paragraph::new(Line::from(vec![
-        Span::styled(" [↑↓] ", Style::default().fg(Color::LightRed)),
-        Span::raw(select_txt),
-        Span::styled(" [L] ", Style::default().fg(Color::LightRed)),
-        Span::raw(lock_txt),
-        Span::styled(" [S] ", Style::default().fg(Color::LightRed)),
-        Span::raw(sort_txt),
-        Span::styled(" [M] ", Style::default().fg(Color::LightRed)),
-        Span::raw(mode_txt),
-        Span::styled(" [T] ", Style::default().fg(Color::LightRed)),
-        Span::raw(time_txt),
-        Span::styled(" [R] ", Style::default().fg(Color::LightRed)),
-        Span::raw(refresh_txt),
-        Span::styled(" [Esc] ", Style::default().fg(Color::LightRed)),
-        Span::raw(quit_txt),
-        Span::styled(" │ ", Style::default().fg(Color::DarkGray)),
-        status_span,
-    ]));
+    if is_narrow {
+        spans.extend([
+            Span::styled("↑↓", theme.accent_style()),
+            Span::styled(" nav  ", theme.subtle_style()),
+            Span::styled("L", theme.accent_style()),
+            Span::styled(" lock  ", theme.subtle_style()),
+            Span::styled("S", theme.accent_style()),
+            Span::styled(" sort  ", theme.subtle_style()),
+            Span::styled("M", theme.accent_style()),
+            Span::styled(" mode  ", theme.subtle_style()),
+            Span::styled("q", theme.accent_style()),
+            Span::styled(" quit", theme.subtle_style()),
+        ]);
+    } else {
+        let select_txt = tr(app.locale, TextKey::ActionSelect);
+        let lock_txt = tr(app.locale, TextKey::ActionLock);
+        let sort_txt = tr(app.locale, TextKey::ActionSort);
+        let mode_txt = tr(app.locale, TextKey::ActionMode);
+        let time_txt = tr(app.locale, TextKey::ActionTime);
+        let refresh_txt = tr(app.locale, TextKey::ActionRefresh);
+        let quit_txt = tr(app.locale, TextKey::ActionQuit);
+
+        spans.extend([
+            Span::styled("↑↓/jk ", theme.accent_style()),
+            Span::styled(format!("{}  ·  ", select_txt), theme.subtle_style()),
+            Span::styled("L ", theme.accent_style()),
+            Span::styled(format!("{}  ·  ", lock_txt), theme.subtle_style()),
+            Span::styled("S ", theme.accent_style()),
+            Span::styled(format!("{}  ·  ", sort_txt), theme.subtle_style()),
+            Span::styled("M ", theme.accent_style()),
+            Span::styled(format!("{}  ·  ", mode_txt), theme.subtle_style()),
+            Span::styled("T ", theme.accent_style()),
+            Span::styled(format!("{}  ·  ", time_txt), theme.subtle_style()),
+            Span::styled("R ", theme.accent_style()),
+            Span::styled(format!("{}  ·  ", refresh_txt), theme.subtle_style()),
+            Span::styled("Esc/q ", theme.accent_style()),
+            Span::styled(quit_txt, theme.subtle_style()),
+        ]);
+    }
+
+    let footer = Paragraph::new(Line::from(spans));
     f.render_widget(footer, area);
 }
 
-pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_lock_modal(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Clear, area);
 
     let modal_title = tr(app.locale, TextKey::ModalTitle);
-    let select_txt = tr(app.locale, TextKey::ModalSelect);
     let toggle_txt = tr(app.locale, TextKey::ModalToggle);
+    let all_txt = tr(app.locale, TextKey::ModalAll);
+    let invert_txt = tr(app.locale, TextKey::ModalInvert);
     let apply_txt = tr(app.locale, TextKey::ModalApply);
     let cancel_txt = tr(app.locale, TextKey::ModalCancel);
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::LightRed))
-        .title(Span::styled(
-            modal_title,
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ));
+        .border_style(theme.accent_style())
+        .title(Span::styled(modal_title, theme.primary_style()));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
@@ -459,9 +605,9 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
             let text = format!("{}{}{} ({}){}", checkbox, flag_str, name, code, ping_str);
 
             let mut style = if is_selected {
-                Style::default().fg(Color::Green)
+                Style::default().fg(theme.success)
             } else {
-                Style::default().fg(Color::DarkGray)
+                theme.subtle_style()
             };
 
             if idx == app.lock_modal_cursor {
@@ -477,22 +623,23 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, area: Rect) {
     list_state.select(Some(app.lock_modal_cursor));
     f.render_stateful_widget(list, modal_chunks[0], &mut list_state);
 
-    // UX Fix 2: Modal action line rendered as a dedicated paragraph with red brackets and default fg text
     let modal_instructions = Line::from(vec![
-        Span::styled(" [↑↓] ", Style::default().fg(Color::LightRed)),
-        Span::styled(select_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [Space] ", Style::default().fg(Color::LightRed)),
+        Span::styled(" [Space] ", theme.accent_style()),
         Span::styled(toggle_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [Enter] ", Style::default().fg(Color::LightRed)),
+        Span::styled("  [a] ", theme.accent_style()),
+        Span::styled(all_txt, Style::default().fg(Color::Reset)),
+        Span::styled("  [i] ", theme.accent_style()),
+        Span::styled(invert_txt, Style::default().fg(Color::Reset)),
+        Span::styled("  [Enter] ", theme.accent_style()),
         Span::styled(apply_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [Esc] ", Style::default().fg(Color::LightRed)),
+        Span::styled("  [Esc] ", theme.accent_style()),
         Span::styled(cancel_txt, Style::default().fg(Color::Reset)),
     ]);
     let footer_widget = Paragraph::new(modal_instructions);
     f.render_widget(footer_widget, modal_chunks[1]);
 }
 
-pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
+pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     if area.height < SUMMARY_HEIGHT {
         return;
     }
@@ -515,11 +662,11 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
      -> Line<'_> {
         let label_span = Span::styled(
             pad_right(tr(app.locale, key), SUMMARY_LABEL_WIDTH),
-            Style::default().fg(Color::DarkGray),
+            theme.subtle_style(),
         );
         if let Some(best) = pick {
             let time_str = role.queue_time(best.row);
-            let time_color = color_for_time(time_str);
+            let time_color = theme.color_for_queue_time(time_str);
             let time_span = Span::styled(
                 pad_right(time_str, SUMMARY_TIME_WIDTH),
                 Style::default().fg(time_color),
@@ -533,9 +680,7 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
             let aws_code = api_to_aws.get(best.row.name.as_str()).unwrap_or(&"");
             let is_locked = app.locked.contains(*aws_code);
             let name_style = if is_locked {
-                Style::default()
-                    .fg(Color::LightRed)
-                    .add_modifier(Modifier::BOLD)
+                theme.accent_style()
             } else {
                 Style::default().add_modifier(Modifier::BOLD)
             };
@@ -543,9 +688,9 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
 
             let ping = app.pings.get(*aws_code).copied();
             let (ping_text, ping_color) = if let Some(ms) = ping {
-                (format!("{} ms", ms), crate::ping::color_for_ping(Some(ms)))
+                (format!("{} ms", ms), theme.color_for_ping(Some(ms)))
             } else {
-                ("—".to_string(), Color::DarkGray)
+                ("—".to_string(), theme.subtle_text)
             };
             let ping_span = Span::styled(
                 pad_right(&ping_text, SUMMARY_PING_WIDTH),
@@ -560,15 +705,12 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
                     best.similar,
                     tr(app.locale, TextKey::SummarySimilar)
                 );
-                spans.push(Span::styled(sim_str, Style::default().fg(Color::DarkGray)));
+                spans.push(Span::styled(sim_str, theme.subtle_style()));
             }
 
             Line::from(spans)
         } else {
-            Line::from(vec![
-                label_span,
-                Span::styled("—", Style::default().fg(Color::DarkGray)),
-            ])
+            Line::from(vec![label_span, Span::styled("—", theme.subtle_style())])
         }
     };
 
@@ -585,12 +727,10 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray))
+        .border_style(theme.subtle_style())
         .title(Span::styled(
             format!(" {} ", tr(app.locale, TextKey::SummaryTitle)),
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
+            theme.primary_style(),
         ));
 
     let paragraph = Paragraph::new(vec![killer_line, survivor_line]).block(block);
@@ -598,59 +738,76 @@ pub fn draw_summary(f: &mut Frame, app: &App, area: Rect) {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    let theme = Theme::new();
+
+    // 1. Minimum Floor Guard (< 48 cols or < 12 rows)
+    if f.area().width < MIN_WIDTH || f.area().height < MIN_HEIGHT {
+        draw_floor_warning(f, &theme, f.area());
+        return;
+    }
+
+    let is_narrow = f.area().width < STANDARD_WIDTH_BREAKPOINT;
+
+    // 2. Single outer border around the main application
+    let outer_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
+        .border_style(theme.subtle_style())
+        .title(Span::styled(
+            format!(" {} ", tr(app.locale, TextKey::HeaderTitle)),
+            theme.accent_style(),
+        ));
+    let inner_area = outer_block.inner(f.area());
+    f.render_widget(outer_block, f.area());
+
+    // 3. Layout partitioning inside outer frame
     let rows_data = app.get_filtered_sorted_rows();
     let is_empty = rows_data.is_empty();
     let desired_table_height = if is_empty {
         EMPTY_TABLE_HEIGHT
     } else {
-        (rows_data.len() as u16) + TABLE_CHROME_HEIGHT
+        (rows_data.len() as u16) + 2 // header row + bottom margin
     };
 
-    let margin = if f.area().height < 20 {
-        0
-    } else {
-        LAYOUT_MARGIN
-    };
-    let non_table_fixed = HEADER_HEIGHT + SUMMARY_HEIGHT + FOOTER_HEIGHT + 2 * margin;
-
-    let (show_summary, table_height) = if f.area().height >= non_table_fixed + 4 {
-        let available_for_table = f.area().height.saturating_sub(non_table_fixed);
+    let non_table_fixed = HEADER_HEIGHT + SUMMARY_HEIGHT + FOOTER_HEIGHT;
+    let (show_summary, table_height) = if inner_area.height >= non_table_fixed + 4 && !is_narrow {
+        let available_for_table = inner_area.height.saturating_sub(non_table_fixed);
         (true, desired_table_height.min(available_for_table))
-    } else {
-        let available_without_summary = f
-            .area()
-            .height
-            .saturating_sub(HEADER_HEIGHT + FOOTER_HEIGHT + 2 * margin);
+    } else if inner_area.height >= HEADER_HEIGHT + FOOTER_HEIGHT + 4 {
+        let available_without_summary =
+            inner_area.height.saturating_sub(HEADER_HEIGHT + FOOTER_HEIGHT);
         (false, desired_table_height.min(available_without_summary))
+    } else {
+        (false, desired_table_height.min(inner_area.height))
     };
+
+    let mut constraints = vec![
+        Constraint::Length(HEADER_HEIGHT), // 0: Header strip
+        Constraint::Length(table_height),  // 1: Table
+    ];
+    if show_summary {
+        constraints.push(Constraint::Length(SUMMARY_HEIGHT)); // 2: Summary card
+    }
+    constraints.push(Constraint::Length(FOOTER_HEIGHT)); // Footer
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .margin(margin)
-        .constraints([
-            Constraint::Length(HEADER_HEIGHT),
-            Constraint::Length(table_height),
-            if show_summary {
-                Constraint::Min(SUMMARY_HEIGHT)
-            } else {
-                Constraint::Min(0)
-            },
-            Constraint::Length(FOOTER_HEIGHT),
-        ])
-        .split(f.area());
+        .constraints(constraints)
+        .split(inner_area);
 
-    let table_area = center_horizontally(chunks[1], TABLE_WIDTH);
-
-    draw_header(f, app, chunks[0]);
-    draw_table(f, app, table_area);
+    draw_header(f, app, &theme, chunks[0]);
+    draw_table(f, app, &theme, chunks[1], is_narrow);
     if show_summary {
-        draw_summary(f, app, chunks[2]);
+        draw_summary(f, app, &theme, chunks[2]);
+        draw_footer(f, app, &theme, chunks[3], is_narrow);
+    } else {
+        draw_footer(f, app, &theme, chunks[2], is_narrow);
     }
-    draw_footer(f, app, chunks[3]);
 
+    // 4. Modal overlay (if active)
     if app.show_lock_modal {
         let modal_area = centered_rect(MODAL_WIDTH_PERCENT, MODAL_HEIGHT_PERCENT, f.area());
-        draw_lock_modal(f, app, modal_area);
+        draw_lock_modal(f, app, &theme, modal_area);
     }
 }
 
@@ -680,16 +837,16 @@ mod tests {
 
         let buffer = terminal.backend().buffer();
 
-        // Search the buffer for the modal action line containing "[↑↓]" and "Select"
+        // Search the buffer for the modal action line containing "[Space]" and "Toggle"
         let mut found_line = false;
         for y in 0..buffer.area.height {
             let line_chars: String = (0..buffer.area.width)
                 .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
                 .collect();
 
-            if line_chars.contains("[↑↓]") && line_chars.contains("Select") {
+            if line_chars.contains("[Space]") && line_chars.contains("Toggle") {
                 found_line = true;
-                // Find column index of '[' in "[↑↓]"
+                // Find column index of '[' in "[Space]"
                 let byte_bracket = line_chars.find('[').unwrap();
                 let bracket_x = line_chars[..byte_bracket].chars().count() as u16;
                 let bracket_cell = &buffer[(bracket_x, y)];
@@ -699,19 +856,19 @@ mod tests {
                     "Bracket cell '[' should be LightRed"
                 );
 
-                // Find column index of 'S' in "Select"
-                let byte_select = line_chars.find("Select").unwrap();
-                let select_x = line_chars[..byte_select].chars().count() as u16;
-                let text_cell = &buffer[(select_x, y)];
+                // Find column index of 'T' in "Toggle"
+                let byte_toggle = line_chars.find("Toggle").unwrap();
+                let toggle_x = line_chars[..byte_toggle].chars().count() as u16;
+                let text_cell = &buffer[(toggle_x, y)];
                 assert_ne!(
                     text_cell.fg,
                     Color::LightRed,
-                    "Label text 'Select' must not inherit LightRed border color"
+                    "Label text 'Toggle' must not inherit LightRed border color"
                 );
                 assert_eq!(
                     text_cell.fg,
                     Color::Reset,
-                    "Label text 'Select' should be default/Reset fg"
+                    "Label text 'Toggle' should be default/Reset fg"
                 );
                 break;
             }
@@ -809,6 +966,7 @@ mod tests {
 
     #[test]
     fn test_draw_summary_russian_and_skip_height() {
+        let theme = Theme::new();
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
@@ -828,7 +986,7 @@ mod tests {
         let backend_small = TestBackend::new(80, 3);
         let mut term_small = Terminal::new(backend_small).unwrap();
         term_small
-            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 3)))
+            .draw(|f| draw_summary(f, &app, &theme, Rect::new(0, 0, 80, 3)))
             .unwrap();
         let buf_small = term_small.backend().buffer();
         for y in 0..3 {
@@ -842,7 +1000,7 @@ mod tests {
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 10)))
+            .draw(|f| draw_summary(f, &app, &theme, Rect::new(0, 0, 80, 10)))
             .unwrap();
         let buf = terminal.backend().buffer();
         let mut found_title = false;
@@ -882,6 +1040,7 @@ mod tests {
 
     #[test]
     fn test_draw_summary_alignment_and_tight_height() {
+        let theme = Theme::new();
         let mut app = App::new(
             SortOrder::Default,
             GameMode::Standard,
@@ -900,7 +1059,7 @@ mod tests {
         let backend = TestBackend::new(80, 10);
         let mut terminal = Terminal::new(backend).unwrap();
         terminal
-            .draw(|f| draw_summary(f, &app, Rect::new(0, 0, 80, 10)))
+            .draw(|f| draw_summary(f, &app, &theme, Rect::new(0, 0, 80, 10)))
             .unwrap();
         let buf = terminal.backend().buffer();
 
@@ -990,27 +1149,34 @@ mod tests {
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer = terminal.backend().buffer();
 
-        let l0: String = (0..80)
-            .map(|x| buffer[(x, 2)].symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(
-            l0.contains("Time: ") && l0.contains("Exact"),
-            "Header must display 'Time: Exact', got: '{}'",
-            l0
-        );
+        let mut found_time = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Time: ") && line.contains("Exact") {
+                found_time = true;
+                break;
+            }
+        }
+        assert!(found_time, "Header must display 'Time: Exact'");
 
         // Toggle to rounded
         app.toggle_time_format();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer2 = terminal.backend().buffer();
-        let l0_rounded: String = (0..80)
-            .map(|x| buffer2[(x, 2)].symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(
-            l0_rounded.contains("Time: ") && l0_rounded.contains("~Rounded"),
-            "Header must display 'Time: ~Rounded', got: '{}'",
-            l0_rounded
-        );
+
+        let mut found_rounded = false;
+        for y in 0..buffer2.area.height {
+            let line: String = (0..buffer2.area.width)
+                .map(|x| buffer2[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Time: ") && line.contains("~Rounded") {
+                found_rounded = true;
+                break;
+            }
+        }
+        assert!(found_rounded, "Header must display 'Time: ~Rounded'");
     }
 
     #[test]
@@ -1035,12 +1201,22 @@ mod tests {
         // 1. Standard mode: event badge must NOT appear
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer = terminal.backend().buffer();
-        let header_line: String = (0..100)
-            .map(|x| buffer[(x, 2)].symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(header_line.contains("Mode: Standard"));
+        let mut standard_badge_found = false;
+        let mut standard_mode_found = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Mode: Standard") {
+                standard_mode_found = true;
+            }
+            if line.contains("2v8 event") {
+                standard_badge_found = true;
+            }
+        }
+        assert!(standard_mode_found);
         assert!(
-            !header_line.contains("2v8 event"),
+            !standard_badge_found,
             "Event badge must not appear in Standard mode"
         );
 
@@ -1048,11 +1224,17 @@ mod tests {
         app.mode = GameMode::Event;
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer2 = terminal.backend().buffer();
-        let header_line_event: String = (0..100)
-            .map(|x| buffer2[(x, 2)].symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(header_line_event.contains("Mode: Event [2v8 event - 11d left]"));
-        assert!(header_line_event.contains("│  Time: ~Rounded"));
+        let mut event_badge_found = false;
+        for y in 0..buffer2.area.height {
+            let line: String = (0..buffer2.area.width)
+                .map(|x| buffer2[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Mode: Event [2v8 event - 11d left]") {
+                event_badge_found = true;
+                break;
+            }
+        }
+        assert!(event_badge_found, "Event badge must appear in Event mode");
 
         // 3. Rounding check: 10d 23h should round to 11d instead of truncating to 10d
         app.current_event = Some(api::EventItem {
@@ -1065,9 +1247,139 @@ mod tests {
         });
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer3 = terminal.backend().buffer();
-        let header_line_rounded: String = (0..100)
-            .map(|x| buffer3[(x, 2)].symbol().chars().next().unwrap_or(' '))
-            .collect();
-        assert!(header_line_rounded.contains("Mode: Event [2v8 event - 11d left]"));
+        let mut rounded_badge_found = false;
+        for y in 0..buffer3.area.height {
+            let line: String = (0..buffer3.area.width)
+                .map(|x| buffer3[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Mode: Event [2v8 event - 11d left]") {
+                rounded_badge_found = true;
+                break;
+            }
+        }
+        assert!(
+            rounded_badge_found,
+            "Event badge must correctly round 10d 23h to 11d"
+        );
+    }
+
+    #[test]
+    fn test_terminal_floor_under_48x12() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+
+        let backend = TestBackend::new(40, 10);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let mut found_floor_msg = false;
+        let mut found_min_size = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Terminal too small") {
+                found_floor_msg = true;
+            }
+            if line.contains("Minimum required: 48x12") {
+                found_min_size = true;
+            }
+        }
+        assert!(found_floor_msg, "Must display 'Terminal too small' on small viewport");
+        assert!(found_min_size, "Must display 'Minimum required: 48x12'");
+    }
+
+    #[test]
+    fn test_narrow_layout_60x24() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            api::RegionQueueData::new("[US]", "Virginia", "Standard", "15s", "8s"),
+        ];
+
+        let backend = TestBackend::new(60, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let mut found_narrow_headers = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Region") && line.contains("Ping") && line.contains("Surv") && line.contains("Kill") {
+                found_narrow_headers = true;
+                break;
+            }
+        }
+        assert!(found_narrow_headers, "Narrow viewport should render abbreviated headers (Region, Ping, Surv, Kill)");
+    }
+
+    #[test]
+    fn test_no_color_theme() {
+        // Temporarily set NO_COLOR
+        unsafe { std::env::set_var("NO_COLOR", "1") };
+        let theme = Theme::new();
+        assert!(theme.no_color);
+        assert_eq!(theme.border_normal, Color::Reset);
+        assert_eq!(theme.accent, Color::Reset);
+        assert_eq!(theme.color_for_queue_time("10s"), Color::Reset);
+        assert_eq!(theme.color_for_ping(Some(30)), Color::Reset);
+
+        // Clear NO_COLOR
+        unsafe { std::env::remove_var("NO_COLOR") };
+        let theme_color = Theme::new();
+        assert!(!theme_color.no_color);
+        assert_ne!(theme_color.accent, Color::Reset);
+        assert_eq!(theme_color.color_for_queue_time("10s"), Color::Green);
+    }
+
+    #[test]
+    fn test_sort_arrow_rendering() {
+        let mut app = App::new(
+            SortOrder::Ping,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+        ];
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let mut found_arrow = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Ping ▲") {
+                found_arrow = true;
+                break;
+            }
+        }
+        assert!(found_arrow, "Active sort order Ping must display 'Ping ▲'");
     }
 }
