@@ -10,3 +10,7 @@ config.json
 .agents/
 _agents/
 skills-lock.json
+PROJECT.md
+SPEC.md
+ROADMAP.md
+TASKS.md
