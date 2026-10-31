@@ -798,18 +798,28 @@ mod tests {
     fn test_resolve_region_names() {
         let input1 = vec!["Frankfurt,Dublin".to_string()];
         let parsed1 = resolve_region_names(&input1);
-        assert_eq!(parsed1, Ok(vec!["Frankfurt".to_string(), "Dublin".to_string()]));
+        assert_eq!(
+            parsed1,
+            Ok(vec!["Frankfurt".to_string(), "Dublin".to_string()])
+        );
 
         let input2 = vec!["sao paulo, montreal, virginia".to_string()];
         let parsed2 = resolve_region_names(&input2);
         assert_eq!(
             parsed2,
-            Ok(vec!["São Paulo".to_string(), "Montréal".to_string(), "Virginia".to_string()])
+            Ok(vec![
+                "São Paulo".to_string(),
+                "Montréal".to_string(),
+                "Virginia".to_string()
+            ])
         );
 
         let input3 = vec!["us-east-1".to_string(), "eu-central-1".to_string()];
         let parsed3 = resolve_region_names(&input3);
-        assert_eq!(parsed3, Ok(vec!["Virginia".to_string(), "Frankfurt".to_string()]));
+        assert_eq!(
+            parsed3,
+            Ok(vec!["Virginia".to_string(), "Frankfurt".to_string()])
+        );
 
         // Hyphenated multi-word names
         let input_hyphen = vec!["sao-paulo".to_string(), "hong-kong".to_string()];

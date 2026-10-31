@@ -123,7 +123,9 @@ impl Theme {
     }
 
     pub fn primary_style(&self) -> Style {
-        Style::default().fg(self.text_primary).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(self.text_primary)
+            .add_modifier(Modifier::BOLD)
     }
 
     pub fn subtle_style(&self) -> Style {
@@ -131,7 +133,9 @@ impl Theme {
     }
 
     pub fn accent_style(&self) -> Style {
-        Style::default().fg(self.accent).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(self.accent)
+            .add_modifier(Modifier::BOLD)
     }
 }
 
@@ -790,8 +794,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         let available_for_table = inner_area.height.saturating_sub(non_table_fixed);
         (true, desired_table_height.min(available_for_table))
     } else if inner_area.height >= HEADER_HEIGHT + FOOTER_HEIGHT + 4 {
-        let available_without_summary =
-            inner_area.height.saturating_sub(HEADER_HEIGHT + FOOTER_HEIGHT);
+        let available_without_summary = inner_area
+            .height
+            .saturating_sub(HEADER_HEIGHT + FOOTER_HEIGHT);
         (false, desired_table_height.min(available_without_summary))
     } else {
         (false, desired_table_height.min(inner_area.height))
@@ -1309,7 +1314,10 @@ mod tests {
                 found_min_size = true;
             }
         }
-        assert!(found_floor_msg, "Must display 'Terminal too small' on small viewport");
+        assert!(
+            found_floor_msg,
+            "Must display 'Terminal too small' on small viewport"
+        );
         assert!(found_min_size, "Must display 'Minimum required: 48x12'");
     }
 
@@ -1339,12 +1347,19 @@ mod tests {
             let line: String = (0..buffer.area.width)
                 .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
                 .collect();
-            if line.contains("Region") && line.contains("Ping") && line.contains("Surv") && line.contains("Kill") {
+            if line.contains("Region")
+                && line.contains("Ping")
+                && line.contains("Surv")
+                && line.contains("Kill")
+            {
                 found_narrow_headers = true;
                 break;
             }
         }
-        assert!(found_narrow_headers, "Narrow viewport should render abbreviated headers (Region, Ping, Surv, Kill)");
+        assert!(
+            found_narrow_headers,
+            "Narrow viewport should render abbreviated headers (Region, Ping, Surv, Kill)"
+        );
     }
 
     #[test]
@@ -1381,9 +1396,13 @@ mod tests {
             Language::En,
             None,
         );
-        app.queues = vec![
-            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
-        ];
+        app.queues = vec![api::RegionQueueData::new(
+            "[DE]",
+            "Frankfurt",
+            "Standard",
+            "10s",
+            "6s",
+        )];
 
         let backend = TestBackend::new(80, 24);
         let mut terminal = Terminal::new(backend).unwrap();

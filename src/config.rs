@@ -376,7 +376,10 @@ mod tests {
         // SortOrder
         assert_eq!(SortOrder::from_str("default", true), Ok(SortOrder::Default));
         assert_eq!(SortOrder::from_str("killer", true), Ok(SortOrder::Killer));
-        assert_eq!(SortOrder::from_str("survivor", true), Ok(SortOrder::Survivor));
+        assert_eq!(
+            SortOrder::from_str("survivor", true),
+            Ok(SortOrder::Survivor)
+        );
         assert_eq!(SortOrder::from_str("ping", true), Ok(SortOrder::Ping));
         assert_eq!(SortOrder::from_str("priority", true), Ok(SortOrder::Ping));
         assert_eq!(SortOrder::from_str("KILLER", true), Ok(SortOrder::Killer));
@@ -391,7 +394,10 @@ mod tests {
 
         // TimeFormat
         assert_eq!(TimeFormat::from_str("exact", true), Ok(TimeFormat::Exact));
-        assert_eq!(TimeFormat::from_str("rounded", true), Ok(TimeFormat::Rounded));
+        assert_eq!(
+            TimeFormat::from_str("rounded", true),
+            Ok(TimeFormat::Rounded)
+        );
         assert_eq!(TimeFormat::from_str("EXACT", true), Ok(TimeFormat::Exact));
         assert!(TimeFormat::from_str("invalid", true).is_err());
     }

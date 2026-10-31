@@ -29,12 +29,7 @@ struct Cli {
     )]
     sort: Option<SortOrder>,
 
-    #[arg(
-        short,
-        long,
-        ignore_case = true,
-        help = "Filter rows by Mode"
-    )]
+    #[arg(short, long, ignore_case = true, help = "Filter rows by Mode")]
     mode: Option<GameMode>,
 
     #[arg(
@@ -84,9 +79,7 @@ fn main() {
         config_changed = true;
     }
 
-    if config_changed
-        && let Err(e) = save_config(&config_path, &config)
-    {
+    if config_changed && let Err(e) = save_config(&config_path, &config) {
         eprintln!("Failed to save config: {}", e);
         process::exit(1);
     }
@@ -130,7 +123,8 @@ fn main() {
                 }
 
                 match hosts::update_hosts(Some(&resolved_regions), true) {
-                    hosts::UpdateHostsResult::Updated | hosts::UpdateHostsResult::AlreadyUpToDate => {
+                    hosts::UpdateHostsResult::Updated
+                    | hosts::UpdateHostsResult::AlreadyUpToDate => {
                         config.locked = resolved_regions;
                         if let Err(e) = save_config(&config_path, &config) {
                             eprintln!("Failed to save config: {}", e);
@@ -148,26 +142,24 @@ fn main() {
                     }
                 }
             }
-            Commands::Unlock => {
-                match hosts::update_hosts(None, true) {
-                    hosts::UpdateHostsResult::Updated | hosts::UpdateHostsResult::AlreadyUpToDate => {
-                        config.locked = vec![];
-                        if let Err(e) = save_config(&config_path, &config) {
-                            eprintln!("Failed to save config: {}", e);
-                            process::exit(1);
-                        }
-                        process::exit(0);
-                    }
-                    hosts::UpdateHostsResult::ElevationFailed => {
-                        eprintln!("Elevation failed/cancelled.");
+            Commands::Unlock => match hosts::update_hosts(None, true) {
+                hosts::UpdateHostsResult::Updated | hosts::UpdateHostsResult::AlreadyUpToDate => {
+                    config.locked = vec![];
+                    if let Err(e) = save_config(&config_path, &config) {
+                        eprintln!("Failed to save config: {}", e);
                         process::exit(1);
                     }
-                    hosts::UpdateHostsResult::Error(e) => {
-                        eprintln!("Error: {}", e);
-                        process::exit(1);
-                    }
+                    process::exit(0);
                 }
-            }
+                hosts::UpdateHostsResult::ElevationFailed => {
+                    eprintln!("Elevation failed/cancelled.");
+                    process::exit(1);
+                }
+                hosts::UpdateHostsResult::Error(e) => {
+                    eprintln!("Error: {}", e);
+                    process::exit(1);
+                }
+            },
         }
     }
 
@@ -243,7 +235,10 @@ mod tests {
         // Invalid sort order rejected
         let res = Cli::try_parse_from(["dbdq", "--sort", "invalid_sort"]);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().kind(), clap::error::ErrorKind::InvalidValue);
+        assert_eq!(
+            res.unwrap_err().kind(),
+            clap::error::ErrorKind::InvalidValue
+        );
     }
 
     #[test]
@@ -265,7 +260,10 @@ mod tests {
         // Invalid mode rejected
         let res = Cli::try_parse_from(["dbdq", "--mode", "ranked"]);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().kind(), clap::error::ErrorKind::InvalidValue);
+        assert_eq!(
+            res.unwrap_err().kind(),
+            clap::error::ErrorKind::InvalidValue
+        );
     }
 
     #[test]
@@ -283,7 +281,10 @@ mod tests {
         // Invalid time format rejected
         let res = Cli::try_parse_from(["dbdq", "-t", "12h"]);
         assert!(res.is_err());
-        assert_eq!(res.unwrap_err().kind(), clap::error::ErrorKind::InvalidValue);
+        assert_eq!(
+            res.unwrap_err().kind(),
+            clap::error::ErrorKind::InvalidValue
+        );
     }
 
     #[test]
@@ -308,4 +309,3 @@ mod tests {
         }
     }
 }
-

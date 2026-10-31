@@ -125,8 +125,7 @@ pub fn build_windows_elevation_command(src: &Path, dst: &Path) -> String {
 
     format!(
         "Start-Process powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', 'Copy-Item -LiteralPath ''{}'' -Destination ''{}'' -Force' -Verb RunAs -Wait",
-        escaped_src,
-        escaped_dst
+        escaped_src, escaped_dst
     )
 }
 
@@ -579,7 +578,10 @@ mod tests {
 
     #[test]
     fn test_escape_powershell_single_quotes() {
-        assert_eq!(escape_powershell_single_quotes("normal_path"), "normal_path");
+        assert_eq!(
+            escape_powershell_single_quotes("normal_path"),
+            "normal_path"
+        );
         assert_eq!(
             escape_powershell_single_quotes(r"C:\Users\John's PC\hosts.tmp"),
             r"C:\Users\John''''s PC\hosts.tmp"
@@ -655,4 +657,3 @@ mod tests {
         let _ = fs::remove_file(test_file_path);
     }
 }
-
