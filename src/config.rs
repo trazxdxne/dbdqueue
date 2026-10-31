@@ -1,13 +1,16 @@
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[value(rename_all = "kebab-case")]
 pub enum SortOrder {
     #[default]
     Default,
     Killer,
     Survivor,
+    #[value(alias = "priority")]
     Ping,
 }
 
@@ -41,9 +44,11 @@ impl Serialize for SortOrder {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[value(rename_all = "kebab-case")]
 pub enum GameMode {
     #[default]
+    #[value(alias = "both")]
     Standard,
     Event,
 }
@@ -120,7 +125,8 @@ impl Serialize for Language {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(ValueEnum, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[value(rename_all = "kebab-case")]
 pub enum TimeFormat {
     #[default]
     Exact,
@@ -361,5 +367,32 @@ mod tests {
         assert_eq!(loaded.locked, vec!["us-east-1"]);
 
         let _ = fs::remove_file(toml_path);
+    }
+
+    #[test]
+    fn test_value_enum_roundtrip_and_aliases() {
+        use clap::ValueEnum;
+
+        // SortOrder
+        assert_eq!(SortOrder::from_str("default", true), Ok(SortOrder::Default));
+        assert_eq!(SortOrder::from_str("killer", true), Ok(SortOrder::Killer));
+        assert_eq!(SortOrder::from_str("survivor", true), Ok(SortOrder::Survivor));
+        assert_eq!(SortOrder::from_str("ping", true), Ok(SortOrder::Ping));
+        assert_eq!(SortOrder::from_str("priority", true), Ok(SortOrder::Ping));
+        assert_eq!(SortOrder::from_str("KILLER", true), Ok(SortOrder::Killer));
+        assert!(SortOrder::from_str("invalid", true).is_err());
+
+        // GameMode
+        assert_eq!(GameMode::from_str("standard", true), Ok(GameMode::Standard));
+        assert_eq!(GameMode::from_str("event", true), Ok(GameMode::Event));
+        assert_eq!(GameMode::from_str("both", true), Ok(GameMode::Standard));
+        assert_eq!(GameMode::from_str("EVENT", true), Ok(GameMode::Event));
+        assert!(GameMode::from_str("invalid", true).is_err());
+
+        // TimeFormat
+        assert_eq!(TimeFormat::from_str("exact", true), Ok(TimeFormat::Exact));
+        assert_eq!(TimeFormat::from_str("rounded", true), Ok(TimeFormat::Rounded));
+        assert_eq!(TimeFormat::from_str("EXACT", true), Ok(TimeFormat::Exact));
+        assert!(TimeFormat::from_str("invalid", true).is_err());
     }
 }

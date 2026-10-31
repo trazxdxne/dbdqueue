@@ -504,7 +504,7 @@ pub fn format_local_datetime(dt: chrono::DateTime<chrono::Local>) -> String {
     dt.format("%b %d, %H:%M").to_string()
 }
 
-pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
+pub fn resolve_region_names(words_list: &[String]) -> Result<Vec<String>, Vec<String>> {
     let raw_str = words_list.join(" ");
     let mut parts = Vec::new();
     for p in raw_str.split(',') {
@@ -517,9 +517,11 @@ pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
     let mut normalized_map = HashMap::new();
     normalized_map.insert("sao paulo", "São Paulo");
     normalized_map.insert("sao_paulo", "São Paulo");
+    normalized_map.insert("sao-paulo", "São Paulo");
     normalized_map.insert("saopaulo", "São Paulo");
     normalized_map.insert("hong kong", "Hong Kong");
     normalized_map.insert("hong_kong", "Hong Kong");
+    normalized_map.insert("hong-kong", "Hong Kong");
     normalized_map.insert("hongkong", "Hong Kong");
     normalized_map.insert("montreal", "Montréal");
 
@@ -527,17 +529,22 @@ pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
     let aws_to_api = get_aws_to_api();
 
     let mut resolved = Vec::new();
+    let mut invalid = Vec::new();
 
     for part in parts {
         let part_lower = part.to_lowercase();
 
         if let Some(norm) = normalized_map.get(part_lower.as_str()) {
-            resolved.push(norm.to_string());
+            if !resolved.contains(&norm.to_string()) {
+                resolved.push(norm.to_string());
+            }
             continue;
         }
 
         if let Some(api_name) = aws_to_api.get(part_lower.as_str()) {
-            resolved.push(api_name.to_string());
+            if !resolved.contains(&api_name.to_string()) {
+                resolved.push(api_name.to_string());
+            }
             continue;
         }
 
@@ -548,7 +555,9 @@ pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
         };
 
         if api_to_aws.contains_key(part_cap.as_str()) {
-            resolved.push(part_cap);
+            if !resolved.contains(&part_cap) {
+                resolved.push(part_cap);
+            }
             continue;
         }
 
@@ -559,16 +568,22 @@ pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
             if i + 1 < words.len() {
                 let two_words = format!("{} {}", word, words[i + 1].to_lowercase());
                 if let Some(norm) = normalized_map.get(two_words.as_str()) {
-                    resolved.push(norm.to_string());
+                    if !resolved.contains(&norm.to_string()) {
+                        resolved.push(norm.to_string());
+                    }
                     i += 2;
                     continue;
                 }
             }
 
             if let Some(norm) = normalized_map.get(word.as_str()) {
-                resolved.push(norm.to_string());
+                if !resolved.contains(&norm.to_string()) {
+                    resolved.push(norm.to_string());
+                }
             } else if let Some(api_name) = aws_to_api.get(word.as_str()) {
-                resolved.push(api_name.to_string());
+                if !resolved.contains(&api_name.to_string()) {
+                    resolved.push(api_name.to_string());
+                }
             } else {
                 let mut c_chars = word.chars();
                 let word_cap = match c_chars.next() {
@@ -576,29 +591,46 @@ pub fn resolve_region_names(words_list: &[String]) -> Vec<String> {
                     Some(f) => f.to_uppercase().collect::<String>() + c_chars.as_str(),
                 };
                 if api_to_aws.contains_key(word_cap.as_str()) {
-                    resolved.push(word_cap);
+                    if !resolved.contains(&word_cap) {
+                        resolved.push(word_cap);
+                    }
+                } else {
+                    let bad_token = words[i].to_string();
+                    if !invalid.contains(&bad_token) {
+                        invalid.push(bad_token);
+                    }
                 }
             }
             i += 1;
         }
     }
 
-    resolved
+    if invalid.is_empty() {
+        Ok(resolved)
+    } else {
+        Err(invalid)
+    }
 }
 
-pub fn resolve_to_aws_codes(words_list: &[String]) -> Vec<String> {
+pub fn resolve_to_aws_codes(words_list: &[String]) -> Result<Vec<String>, Vec<String>> {
     let mut resolved = Vec::new();
     let api_to_aws = get_api_to_aws();
     let all_aws = get_all_aws_regions();
-    let names = resolve_region_names(words_list);
+    let names = resolve_region_names(words_list)?;
     for r in names {
         if let Some(aws_code) = api_to_aws.get(r.as_str()) {
-            resolved.push(aws_code.to_string());
+            if !resolved.contains(&aws_code.to_string()) {
+                resolved.push(aws_code.to_string());
+            }
         } else if all_aws.contains(&r.as_str()) {
-            resolved.push(r);
+            if !resolved.contains(&r) {
+                resolved.push(r);
+            }
+        } else {
+            return Err(vec![r]);
         }
     }
-    resolved
+    Ok(resolved)
 }
 
 #[cfg(test)]
@@ -766,15 +798,45 @@ mod tests {
     fn test_resolve_region_names() {
         let input1 = vec!["Frankfurt,Dublin".to_string()];
         let parsed1 = resolve_region_names(&input1);
-        assert_eq!(parsed1, vec!["Frankfurt", "Dublin"]);
+        assert_eq!(parsed1, Ok(vec!["Frankfurt".to_string(), "Dublin".to_string()]));
 
         let input2 = vec!["sao paulo, montreal, virginia".to_string()];
         let parsed2 = resolve_region_names(&input2);
-        assert_eq!(parsed2, vec!["São Paulo", "Montréal", "Virginia"]);
+        assert_eq!(
+            parsed2,
+            Ok(vec!["São Paulo".to_string(), "Montréal".to_string(), "Virginia".to_string()])
+        );
 
         let input3 = vec!["us-east-1".to_string(), "eu-central-1".to_string()];
         let parsed3 = resolve_region_names(&input3);
-        assert_eq!(parsed3, vec!["Virginia", "Frankfurt"]);
+        assert_eq!(parsed3, Ok(vec!["Virginia".to_string(), "Frankfurt".to_string()]));
+
+        // Hyphenated multi-word names
+        let input_hyphen = vec!["sao-paulo".to_string(), "hong-kong".to_string()];
+        assert_eq!(
+            resolve_region_names(&input_hyphen),
+            Ok(vec!["São Paulo".to_string(), "Hong Kong".to_string()])
+        );
+
+        // Deduplication
+        let input_dup = vec!["Frankfurt, Frankfurt".to_string()];
+        assert_eq!(
+            resolve_region_names(&input_dup),
+            Ok(vec!["Frankfurt".to_string()])
+        );
+
+        // Invalid tokens rejection
+        let input_invalid = vec!["Frankfurt".to_string(), "atlantis".to_string()];
+        assert_eq!(
+            resolve_region_names(&input_invalid),
+            Err(vec!["atlantis".to_string()])
+        );
+
+        let input_multiple_invalid = vec!["mars".to_string(), "jupiter".to_string()];
+        assert_eq!(
+            resolve_region_names(&input_multiple_invalid),
+            Err(vec!["mars".to_string(), "jupiter".to_string()])
+        );
     }
 
     #[test]
@@ -785,7 +847,28 @@ mod tests {
             "us-east-1".to_string(),
         ];
         let codes = resolve_to_aws_codes(&input);
-        assert_eq!(codes, vec!["eu-central-1", "sa-east-1", "us-east-1"]);
+        assert_eq!(
+            codes,
+            Ok(vec![
+                "eu-central-1".to_string(),
+                "sa-east-1".to_string(),
+                "us-east-1".to_string()
+            ])
+        );
+
+        // Invalid token returns Err
+        let invalid_input = vec!["unknown_loc".to_string()];
+        assert_eq!(
+            resolve_to_aws_codes(&invalid_input),
+            Err(vec!["unknown_loc".to_string()])
+        );
+
+        // Mixed valid and invalid tokens return Err
+        let mixed_input = vec!["Frankfurt".to_string(), "unknown_loc".to_string()];
+        assert_eq!(
+            resolve_to_aws_codes(&mixed_input),
+            Err(vec!["unknown_loc".to_string()])
+        );
     }
 
     #[test]

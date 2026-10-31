@@ -74,6 +74,12 @@ pub fn build_hosts_content(
     }
 
     if let Some(selected) = selected_aws_regions {
+        if selected.is_empty() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Cannot lock with 0 regions selected",
+            ));
+        }
         let all_regions = get_all_aws_regions();
         // If we are locking (selecting a subset of regions)
         if selected.len() < all_regions.len() {
@@ -104,9 +110,28 @@ pub fn build_hosts_content(
 pub enum UpdateHostsResult {
     Updated,
     AlreadyUpToDate,
-    #[allow(dead_code)]
     ElevationFailed,
     Error(String),
+}
+
+/// Escapes single quotes for PowerShell execution where the string is nested
+/// inside an outer single-quoted argument string.
+/// In PowerShell, a single quote within a single-quoted string is represented as ''.
+/// When nested inside another single-quoted string, each quote must be doubled again ('''').
+pub fn escape_powershell_single_quotes(s: &str) -> String {
+    s.replace('\'', "''''")
+}
+
+/// Constructs the elevated PowerShell command string for copying hosts file on Windows.
+pub fn build_windows_elevation_command(src: &Path, dst: &Path) -> String {
+    let escaped_src = escape_powershell_single_quotes(&src.to_string_lossy());
+    let escaped_dst = escape_powershell_single_quotes(&dst.to_string_lossy());
+
+    format!(
+        "Start-Process powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', 'Copy-Item -LiteralPath ''{}'' -Destination ''{}'' -Force' -Verb RunAs -Wait",
+        escaped_src,
+        escaped_dst
+    )
 }
 
 #[cfg(windows)]
@@ -186,11 +211,7 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     }
 
     // Trigger elevated PowerShell script to copy the hosts file over
-    let ps_cmd = format!(
-        "Start-Process powershell -ArgumentList '-NoProfile', '-WindowStyle', 'Hidden', '-Command', 'Copy-Item -Path \"{}\" -Destination \"{}\" -Force' -Verb RunAs -Wait",
-        temp_path.to_string_lossy(),
-        HOSTS_PATH
-    );
+    let ps_cmd = build_windows_elevation_command(&temp_path, Path::new(HOSTS_PATH));
 
     let status = Command::new("powershell")
         .args(["-NoProfile", "-Command", &ps_cmd])
@@ -199,30 +220,31 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     // Clean up temp file
     let _ = fs::remove_file(&temp_path);
 
-    match status {
-        Ok(s) if s.success() => {
-            if verbose {
-                let msg = if is_ru {
-                    "Блокировка регионов успешно обновлена!"
-                } else {
-                    "Successfully updated region locks!"
-                };
-                println!("\x1b[92m{}\x1b[0m", msg);
-            }
-            flush_dns_cache();
-            UpdateHostsResult::Updated
+    let hosts_updated = fs::read_to_string(hosts_path)
+        .map(|c| c == new_content)
+        .unwrap_or(false);
+
+    if status.map(|s| s.success()).unwrap_or(false) && hosts_updated {
+        if verbose {
+            let msg = if is_ru {
+                "Блокировка регионов успешно обновлена!"
+            } else {
+                "Successfully updated region locks!"
+            };
+            println!("\x1b[92m{}\x1b[0m", msg);
         }
-        _ => {
-            if verbose {
-                let err_msg = if is_ru {
-                    "Не удалось обновить файл hosts: в повышении прав отказано или произошла ошибка."
-                } else {
-                    "Failed to update hosts file: elevation denied or failed."
-                };
-                eprintln!("\x1b[91m{}\x1b[0m", err_msg);
-            }
-            UpdateHostsResult::ElevationFailed
+        flush_dns_cache();
+        UpdateHostsResult::Updated
+    } else {
+        if verbose {
+            let err_msg = if is_ru {
+                "Не удалось обновить файл hosts: в повышении прав отказано или произошла ошибка."
+            } else {
+                "Failed to update hosts file: elevation denied or failed."
+            };
+            eprintln!("\x1b[91m{}\x1b[0m", err_msg);
         }
+        UpdateHostsResult::ElevationFailed
     }
 }
 
@@ -257,6 +279,37 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
             println!("\x1b[92m{}\x1b[0m", msg);
         }
         return UpdateHostsResult::AlreadyUpToDate;
+    }
+
+    // Attempt direct write first (succeeds when running with root/sudo or write permissions)
+    match fs::write(hosts_path, &new_content) {
+        Ok(()) => {
+            if verbose {
+                let msg = if is_ru {
+                    "Блокировка регионов успешно обновлена!"
+                } else {
+                    "Successfully updated region locks!"
+                };
+                println!("\x1b[92m{}\x1b[0m", msg);
+            }
+            flush_dns_cache();
+            return UpdateHostsResult::Updated;
+        }
+        Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            // Need elevation, continue to pkexec
+        }
+        Err(e) => {
+            let err_msg = format!("{}", e);
+            if verbose {
+                let err_hdr = if is_ru {
+                    "Ошибка записи в файл hosts:"
+                } else {
+                    "Error writing to hosts file:"
+                };
+                eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
+            }
+            return UpdateHostsResult::Error(err_msg);
+        }
     }
 
     if verbose {
@@ -319,6 +372,7 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
                 flush_dns_cache();
                 UpdateHostsResult::Updated
             } else {
+                let code = output.status.code();
                 let err_msg = String::from_utf8_lossy(&output.stderr).to_string();
                 if verbose {
                     let fail_hdr = if is_ru {
@@ -329,11 +383,16 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
                     eprintln!(
                         "\x1b[91m{} (code {:?}):\x1b[0m\n{}",
                         fail_hdr,
-                        output.status.code(),
+                        code,
                         err_msg.trim()
                     );
                 }
-                UpdateHostsResult::Error(err_msg)
+                // pkexec exits with code 126 or 127 if authorization is dismissed or fails
+                if code == Some(126) || code == Some(127) {
+                    UpdateHostsResult::ElevationFailed
+                } else {
+                    UpdateHostsResult::Error(err_msg)
+                }
             }
         }
         Err(e) => {
@@ -499,6 +558,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_escape_powershell_single_quotes() {
+        assert_eq!(escape_powershell_single_quotes("normal_path"), "normal_path");
+        assert_eq!(
+            escape_powershell_single_quotes(r"C:\Users\John's PC\hosts.tmp"),
+            r"C:\Users\John''''s PC\hosts.tmp"
+        );
+        assert_eq!(
+            escape_powershell_single_quotes(r"C:\Users\O'Connor's Laptop\hosts.tmp"),
+            r"C:\Users\O''''Connor''''s Laptop\hosts.tmp"
+        );
+    }
+
+    #[test]
+    fn test_build_windows_elevation_command_format() {
+        let src = Path::new(r"C:\Users\John's [test] PC\hosts.tmp");
+        let dst = Path::new(r"C:\Windows\System32\drivers\etc\hosts");
+        let cmd = build_windows_elevation_command(src, dst);
+
+        // Must use -LiteralPath instead of -Path
+        assert!(cmd.contains("-LiteralPath"));
+        assert!(!cmd.contains("-Path "));
+
+        // Must enclose paths in doubled single quotes ''...''
+        assert!(cmd.contains("''C:\\Users\\John''''s [test] PC\\hosts.tmp''"));
+        assert!(cmd.contains("''C:\\Windows\\System32\\drivers\\etc\\hosts''"));
+
+        // Must specify RunAs and Wait
+        assert!(cmd.contains("-Verb RunAs"));
+        assert!(cmd.contains("-Wait"));
+    }
+
+    #[test]
+    fn test_build_hosts_empty_selected_returns_error() {
+        let test_file_path = Path::new("test_hosts_empty_tmp");
+        let initial = "127.0.0.1 localhost\n";
+        fs::write(test_file_path, initial).unwrap();
+
+        let empty_selected: Vec<String> = vec![];
+        let res = build_hosts_content(test_file_path, Some(&empty_selected));
+        assert!(res.is_err());
+        let err = res.err().unwrap();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+
+        let _ = fs::remove_file(test_file_path);
+    }
+
+    #[test]
     fn test_build_hosts() {
         let test_file_path = Path::new("test_hosts_tmp");
 
@@ -529,3 +635,4 @@ mod tests {
         let _ = fs::remove_file(test_file_path);
     }
 }
+
