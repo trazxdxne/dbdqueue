@@ -7,59 +7,59 @@
 #### Milestone 1: Dependencies, Test Suite Architecture & Metadata
 - [x] Deduplicate `crossterm` dependency: Bumped `crossterm` to `0.29` in `Cargo.toml` to align with `ratatui 0.30.1`.
   - *Acceptance Criteria*: Single version of crossterm compiled without crate version duplication in `Cargo.lock`.
-  - *Verification Evidence*: `Cargo.toml:16`, `Cargo.lock` verified; clean compilation in `cargo test`.
+  - *Verification Evidence*: `Cargo.toml:22`, `Cargo.lock` verified; clean compilation in `cargo test`.
 - [x] Add standard publishing crate metadata to `Cargo.toml`.
   - *Acceptance Criteria*: `description`, `license`, `repository`, `categories`, and `keywords` present.
-  - *Verification Evidence*: `Cargo.toml:5-11`.
+  - *Verification Evidence*: `Cargo.toml:5-10`.
 - [x] Isolate live network ping tests from standard offline test runs.
   - *Acceptance Criteria*: `test_all_regions_ping` marked with `#[ignore]` so default test runs do not contact external AWS endpoints.
-  - *Verification Evidence*: `src/ping.rs:252`; `cargo test` executes 87 tests and 1 ignored test offline.
+  - *Verification Evidence*: `src/ping.rs:92-93`; `cargo test` executes 87 tests and 1 ignored test offline.
 
 #### Milestone 2: Region Validation, CLI Ergonomics & Elevation Security
 - [x] Implement strict CLI region token validation in `src/api.rs` and `src/main.rs`.
   - *Acceptance Criteria*: Unrecognized region tokens emit actionable error messages to `stderr` and exit with non-zero code `1`.
-  - *Verification Evidence*: `src/api.rs:341` (`resolve_region_names`), `src/main.rs:94-106`; unit tests `api::tests::test_resolve_region_names` and `api::tests::test_resolve_to_aws_codes` pass.
+  - *Verification Evidence*: `src/api.rs:507, 536` (`resolve_region_names`, `resolve_to_aws_codes`), `src/main.rs:112-124`; unit tests `api::tests::test_resolve_region_names` and `api::tests::test_resolve_to_aws_codes` pass.
 - [x] Prevent accidental matchmaking blackout on empty resolved region set.
   - *Acceptance Criteria*: Refuse to lock `0.0.0.0` to all endpoints when no valid regions are provided; report error to `stderr` and exit `1`.
-  - *Verification Evidence*: `src/main.rs:104-109`.
+  - *Verification Evidence*: `src/main.rs:101-104, 114-117, 127-130`.
 - [x] Propagate non-zero exit codes on hosts elevation failures and write errors.
   - *Acceptance Criteria*: `UpdateHostsResult::ElevationFailed` and `UpdateHostsResult::Error` emit to `stderr` and terminate with exit code `1`.
-  - *Verification Evidence*: `src/main.rs:114-122` and `src/main.rs:141-149`.
+  - *Verification Evidence*: `src/main.rs:141-149` and `src/main.rs:161-169`.
 - [x] Propagate non-zero exit code on interactive lock modal cancellation.
   - *Acceptance Criteria*: Pressing `Esc` or `q` in interactive modal returns `None`, logs `"Cancelled."` to `stderr`, and exits code `1`.
-  - *Verification Evidence*: `src/main.rs:98-101`; unit test `app::tests::test_quit_ladder_main_and_modal` passes.
+  - *Verification Evidence*: `src/hosts.rs:561-569`, `src/main.rs:107-109`; unit test `app::tests::test_quit_ladder_main_and_modal` passes.
 - [x] Propagate non-zero exit code on configuration save failure.
   - *Acceptance Criteria*: When saving configuration fails during CLI flag updates, log error to `stderr` and exit code `1`.
-  - *Verification Evidence*: `src/main.rs:60-63, 73-76, 85-88`.
+  - *Verification Evidence*: `src/main.rs:87-92, 135-138, 155-158`.
 - [x] Add version output (`--version`, `-V`) to the root CLI parser.
   - *Acceptance Criteria*: `dbdq --version` and `dbdq -V` display the crate version and exit with code `0`.
-  - *Verification Evidence*: `src/main.rs:24` (`#[command(version)]`); unit test `tests::test_cli_version_flag` passes.
+  - *Verification Evidence*: `src/main.rs:21` (`#[command(version)]`); unit test `tests::test_cli_version_flag` passes.
 - [x] Strongly type CLI enum arguments via `clap::ValueEnum`.
   - *Acceptance Criteria*: `SortOrder`, `GameMode`, and `TimeFormat` derive `clap::ValueEnum`, replacing manual string lowercasing.
-  - *Verification Evidence*: `src/config.rs:15, 33, 44`; unit tests `config::tests::test_value_enum_roundtrip_and_aliases`, `tests::test_cli_sort_order_parsing`, `tests::test_cli_game_mode_parsing`, and `tests::test_cli_time_format_parsing` pass.
+  - *Verification Evidence*: `src/config.rs:6, 47, 128`; unit tests `config::tests::test_value_enum_roundtrip_and_aliases`, `tests::test_cli_sort_order_parsing`, `tests::test_cli_game_mode_parsing`, and `tests::test_cli_time_format_parsing` pass.
 - [x] Harden Windows PowerShell elevation commands against command injection.
   - *Acceptance Criteria*: File paths interpolated into PowerShell arguments escape single quotes (`''''`) and utilize `-LiteralPath`.
-  - *Verification Evidence*: `src/hosts.rs:197-227`; unit tests `hosts::tests::test_escape_powershell_single_quotes` and `hosts::tests::test_build_windows_elevation_command_format` pass.
+  - *Verification Evidence*: `src/hosts.rs:117-131, 210-215`; unit tests `hosts::tests::test_escape_powershell_single_quotes` and `hosts::tests::test_build_windows_elevation_command_format` pass.
 - [x] Harden Linux hosts file updates with direct write attempt.
   - *Acceptance Criteria*: On Linux, attempt direct `std::fs::write` to `/etc/hosts` first (for root/sudo) before spawning `pkexec`.
-  - *Verification Evidence*: `src/hosts.rs:247-268` (`write_hosts_file_unix`).
+  - *Verification Evidence*: `src/hosts.rs:280-294` (`update_hosts`).
 
 #### Milestone 3: TUI Design Overhaul & Terminal Panic Guard
 - [x] Install RAII `TerminalGuard` and panic recovery hook in `src/tui.rs`.
   - *Acceptance Criteria*: Raw mode disabled, alternate screen vacated, and cursor restored cleanly on both normal exit and application panic.
-  - *Verification Evidence*: `src/tui.rs:30-80`; unit tests `tui::tests::test_install_panic_hook_idempotent`, `tui::tests::test_terminal_guard_drop_idempotent`, and `tui::tests::test_restore_terminal_does_not_panic` pass.
+  - *Verification Evidence*: `src/tui.rs:19-68`; unit tests `tui::tests::test_install_panic_hook_idempotent`, `tui::tests::test_terminal_guard_drop_idempotent`, and `tui::tests::test_restore_terminal_does_not_panic` pass.
 - [x] Complete TUI clutter audit and eliminate nested boxes.
   - *Acceptance Criteria*: Single-line outer framing, removal of heavy nested rectangular blocks, and elimination of high-contrast bracket highlights.
-  - *Verification Evidence*: `src/ui.rs:26-34, 160-240, 600-660`; unit test `ui::tests::test_draw_with_full_regions_on_80x24_terminal` passes.
+  - *Verification Evidence*: `src/ui.rs:751-812`; unit test `ui::tests::test_draw_with_full_regions_on_80x24_terminal` passes.
 - [x] Implement semantic color tokens (`Theme`) with `NO_COLOR` environment support.
   - *Acceptance Criteria*: Color palette respects functional roles; when `NO_COLOR` is present, colors fall back to monochrome/ASCII without breaking layout.
-  - *Verification Evidence*: `src/ui.rs:36-120`; unit test `ui::tests::test_no_color_theme` passes.
+  - *Verification Evidence*: `src/ui.rs:33-138`; unit test `ui::tests::test_no_color_theme` passes.
 - [x] Implement responsive viewport ladder with floor fallback.
   - *Acceptance Criteria*: Full 80x24 standard layout, 60-col narrow tmux split with prioritized columns, and dedicated fallback screen below 48x12.
-  - *Verification Evidence*: `src/ui.rs:600-650`; unit tests `ui::tests::test_narrow_layout_60x24` and `ui::tests::test_terminal_floor_under_48x12` pass.
+  - *Verification Evidence*: `src/ui.rs:14-20, 162-187, 760-766`; unit tests `ui::tests::test_narrow_layout_60x24` and `ui::tests::test_terminal_floor_under_48x12` pass.
 - [x] Implement vim navigation and standardized `Esc`/`q` quit ladder.
   - *Acceptance Criteria*: Support `j`/`k` and `g`/`G` in table and modal; `Esc` dismisses modals/notices without quitting; `q` cleanly quits at root.
-  - *Verification Evidence*: `src/app.rs:370-490`; unit tests `app::tests::test_vim_keys_table_navigation` and `app::tests::test_quit_ladder_main_and_modal` pass.
+  - *Verification Evidence*: `src/app.rs:248-350, 503-605`; unit tests `app::tests::test_vim_keys_table_navigation` and `app::tests::test_quit_ladder_main_and_modal` pass.
 
 ---
 

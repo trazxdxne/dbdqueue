@@ -52,36 +52,52 @@ impl Default for Theme {
 }
 
 impl Theme {
+    #[must_use]
     pub fn new() -> Self {
         let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+        Self::from_no_color(no_color)
+    }
+
+    #[must_use]
+    pub fn from_no_color(no_color: bool) -> Self {
         if no_color {
-            Self {
-                border_normal: Color::Reset,
-                border_focus: Color::Reset,
-                text_primary: Color::Reset,
-                text_secondary: Color::Reset,
-                subtle_text: Color::Reset,
-                accent: Color::Reset,
-                success: Color::Reset,
-                warning: Color::Reset,
-                error: Color::Reset,
-                info: Color::Reset,
-                no_color: true,
-            }
+            Self::no_color()
         } else {
-            Self {
-                border_normal: Color::DarkGray,
-                border_focus: Color::LightRed,
-                text_primary: Color::White,
-                text_secondary: Color::Gray,
-                subtle_text: Color::DarkGray,
-                accent: Color::LightRed,
-                success: Color::Green,
-                warning: Color::Yellow,
-                error: Color::Red,
-                info: Color::LightYellow,
-                no_color: false,
-            }
+            Self::color()
+        }
+    }
+
+    #[must_use]
+    pub fn no_color() -> Self {
+        Self {
+            border_normal: Color::Reset,
+            border_focus: Color::Reset,
+            text_primary: Color::Reset,
+            text_secondary: Color::Reset,
+            subtle_text: Color::Reset,
+            accent: Color::Reset,
+            success: Color::Reset,
+            warning: Color::Reset,
+            error: Color::Reset,
+            info: Color::Reset,
+            no_color: true,
+        }
+    }
+
+    #[must_use]
+    pub fn color() -> Self {
+        Self {
+            border_normal: Color::DarkGray,
+            border_focus: Color::LightRed,
+            text_primary: Color::White,
+            text_secondary: Color::Gray,
+            subtle_text: Color::DarkGray,
+            accent: Color::LightRed,
+            success: Color::Green,
+            warning: Color::Yellow,
+            error: Color::Red,
+            info: Color::LightYellow,
+            no_color: false,
         }
     }
 
@@ -1333,21 +1349,26 @@ mod tests {
 
     #[test]
     fn test_no_color_theme() {
-        // Temporarily set NO_COLOR
-        unsafe { std::env::set_var("NO_COLOR", "1") };
-        let theme = Theme::new();
-        assert!(theme.no_color);
-        assert_eq!(theme.border_normal, Color::Reset);
-        assert_eq!(theme.accent, Color::Reset);
-        assert_eq!(theme.color_for_queue_time("10s"), Color::Reset);
-        assert_eq!(theme.color_for_ping(Some(30)), Color::Reset);
+        let theme_no_color = Theme::from_no_color(true);
+        assert!(theme_no_color.no_color);
+        assert_eq!(theme_no_color.border_normal, Color::Reset);
+        assert_eq!(theme_no_color.accent, Color::Reset);
+        assert_eq!(theme_no_color.color_for_queue_time("10s"), Color::Reset);
+        assert_eq!(theme_no_color.color_for_ping(Some(30)), Color::Reset);
+        assert_eq!(Theme::no_color(), theme_no_color);
 
-        // Clear NO_COLOR
-        unsafe { std::env::remove_var("NO_COLOR") };
-        let theme_color = Theme::new();
+        let theme_color = Theme::from_no_color(false);
         assert!(!theme_color.no_color);
         assert_ne!(theme_color.accent, Color::Reset);
         assert_eq!(theme_color.color_for_queue_time("10s"), Color::Green);
+        assert_eq!(Theme::color(), theme_color);
+
+        let default_theme = Theme::new();
+        if std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty()) {
+            assert_eq!(default_theme, Theme::no_color());
+        } else {
+            assert_eq!(default_theme, Theme::color());
+        }
     }
 
     #[test]
