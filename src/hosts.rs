@@ -114,11 +114,15 @@ pub enum UpdateHostsResult {
 /// inside an outer single-quoted argument string.
 /// In PowerShell, a single quote within a single-quoted string is represented as ''.
 /// When nested inside another single-quoted string, each quote must be doubled again ('''').
+#[cfg(any(windows, test))]
+#[allow(dead_code)]
 pub fn escape_powershell_single_quotes(s: &str) -> String {
     s.replace('\'', "''''")
 }
 
 /// Constructs the elevated PowerShell command string for copying hosts file on Windows.
+#[cfg(any(windows, test))]
+#[allow(dead_code)]
 pub fn build_windows_elevation_command(src: &Path, dst: &Path) -> String {
     let escaped_src = escape_powershell_single_quotes(&src.to_string_lossy());
     let escaped_dst = escape_powershell_single_quotes(&dst.to_string_lossy());
