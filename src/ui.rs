@@ -7,7 +7,8 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table,
+        Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph,
+        Row, Table,
     },
 };
 
@@ -24,6 +25,7 @@ pub const EMPTY_TABLE_HEIGHT: u16 = 4;
 pub const MODAL_WIDTH_PERCENT: u16 = 65;
 pub const MODAL_HEIGHT_PERCENT: u16 = 80;
 pub const TABLE_WIDTH: u16 = 69;
+pub const NARROW_TABLE_WIDTH: u16 = 44;
 pub const SUMMARY_HEIGHT: u16 = 4;
 pub const SUMMARY_LABEL_WIDTH: usize = 11;
 pub const SUMMARY_TIME_WIDTH: usize = 8;
@@ -287,7 +289,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
     let is_empty = rows_data.is_empty();
 
     let api_to_aws = api::get_api_to_aws();
-    let (rows, col_constraints) = if is_empty {
+    let (rows, col_constraints, spacing) = if is_empty {
         let (msg, color) = if app.is_fetching {
             (
                 tr(app.locale, TextKey::FetchingQueues).to_string(),
@@ -351,6 +353,7 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
                 Constraint::Length(0),
                 Constraint::Length(0),
             ],
+            1,
         )
     } else {
         let r: Vec<Row> = rows_data
@@ -423,23 +426,29 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
             })
             .collect();
 
-        let constraints = if is_narrow {
-            vec![
-                Constraint::Min(16),
-                Constraint::Length(9),
-                Constraint::Length(11),
-                Constraint::Length(11),
-            ]
+        let (constraints, spacing) = if is_narrow {
+            (
+                vec![
+                    Constraint::Length(15),
+                    Constraint::Length(7),
+                    Constraint::Length(9),
+                    Constraint::Length(10),
+                ],
+                1,
+            )
         } else {
-            vec![
-                Constraint::Min(24),
-                Constraint::Length(12),
-                Constraint::Length(14),
-                Constraint::Length(14),
-            ]
+            (
+                vec![
+                    Constraint::Length(24),
+                    Constraint::Length(11),
+                    Constraint::Length(14),
+                    Constraint::Length(14),
+                ],
+                2,
+            )
         };
 
-        (r, constraints)
+        (r, constraints, spacing)
     };
 
     let ping_indicator = if app.sort == crate::config::SortOrder::Ping {
@@ -489,15 +498,21 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
     ])
     .bottom_margin(1);
 
+    let table_area = if is_narrow {
+        center_horizontally(area, NARROW_TABLE_WIDTH)
+    } else {
+        center_horizontally(area, TABLE_WIDTH)
+    };
+
     let mut table = Table::new(rows, col_constraints)
         .header(header_row)
-        .column_spacing(1);
+        .column_spacing(spacing);
 
     if !is_empty {
         table = table.row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     }
 
-    f.render_stateful_widget(table, area, &mut app.table_state);
+    f.render_stateful_widget(table, table_area, &mut app.table_state);
 }
 
 pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narrow: bool) {
@@ -530,7 +545,24 @@ pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narro
 
     let mut spans = vec![status_span, Span::styled("  │  ", theme.subtle_style())];
 
-    if is_narrow {
+    let select_txt = tr(app.locale, TextKey::ActionSelect).trim();
+    let lock_txt = tr(app.locale, TextKey::ActionLock).trim();
+    let sort_txt = tr(app.locale, TextKey::ActionSort).trim();
+    let mode_txt = tr(app.locale, TextKey::ActionMode).trim();
+    let time_txt = tr(app.locale, TextKey::ActionTime).trim();
+    let refresh_txt = tr(app.locale, TextKey::ActionRefresh).trim();
+    let quit_txt = tr(app.locale, TextKey::ActionQuit).trim();
+
+    if area.width < 50 {
+        spans.extend([
+            Span::styled("↑↓", theme.accent_style()),
+            Span::styled(" nav ", theme.subtle_style()),
+            Span::styled("L", theme.accent_style()),
+            Span::styled(" lock ", theme.subtle_style()),
+            Span::styled("q", theme.accent_style()),
+            Span::styled(" quit", theme.subtle_style()),
+        ]);
+    } else if is_narrow {
         spans.extend([
             Span::styled("↑↓", theme.accent_style()),
             Span::styled(" nav  ", theme.subtle_style()),
@@ -543,28 +575,35 @@ pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narro
             Span::styled("q", theme.accent_style()),
             Span::styled(" quit", theme.subtle_style()),
         ]);
+    } else if area.width < 96 {
+        spans.extend([
+            Span::styled("↑↓ ", theme.accent_style()),
+            Span::styled(format!("{} · ", select_txt), theme.subtle_style()),
+            Span::styled("L ", theme.accent_style()),
+            Span::styled(format!("{} · ", lock_txt), theme.subtle_style()),
+            Span::styled("S ", theme.accent_style()),
+            Span::styled(format!("{} · ", sort_txt), theme.subtle_style()),
+            Span::styled("M ", theme.accent_style()),
+            Span::styled(format!("{} · ", mode_txt), theme.subtle_style()),
+            Span::styled("T ", theme.accent_style()),
+            Span::styled(format!("{} · ", time_txt), theme.subtle_style()),
+            Span::styled("q ", theme.accent_style()),
+            Span::styled(quit_txt, theme.subtle_style()),
+        ]);
     } else {
-        let select_txt = tr(app.locale, TextKey::ActionSelect);
-        let lock_txt = tr(app.locale, TextKey::ActionLock);
-        let sort_txt = tr(app.locale, TextKey::ActionSort);
-        let mode_txt = tr(app.locale, TextKey::ActionMode);
-        let time_txt = tr(app.locale, TextKey::ActionTime);
-        let refresh_txt = tr(app.locale, TextKey::ActionRefresh);
-        let quit_txt = tr(app.locale, TextKey::ActionQuit);
-
         spans.extend([
             Span::styled("↑↓/jk ", theme.accent_style()),
-            Span::styled(format!("{}  ·  ", select_txt), theme.subtle_style()),
+            Span::styled(format!("{} · ", select_txt), theme.subtle_style()),
             Span::styled("L ", theme.accent_style()),
-            Span::styled(format!("{}  ·  ", lock_txt), theme.subtle_style()),
+            Span::styled(format!("{} · ", lock_txt), theme.subtle_style()),
             Span::styled("S ", theme.accent_style()),
-            Span::styled(format!("{}  ·  ", sort_txt), theme.subtle_style()),
+            Span::styled(format!("{} · ", sort_txt), theme.subtle_style()),
             Span::styled("M ", theme.accent_style()),
-            Span::styled(format!("{}  ·  ", mode_txt), theme.subtle_style()),
+            Span::styled(format!("{} · ", mode_txt), theme.subtle_style()),
             Span::styled("T ", theme.accent_style()),
-            Span::styled(format!("{}  ·  ", time_txt), theme.subtle_style()),
+            Span::styled(format!("{} · ", time_txt), theme.subtle_style()),
             Span::styled("R ", theme.accent_style()),
-            Span::styled(format!("{}  ·  ", refresh_txt), theme.subtle_style()),
+            Span::styled(format!("{} · ", refresh_txt), theme.subtle_style()),
             Span::styled("Esc/q ", theme.accent_style()),
             Span::styled(quit_txt, theme.subtle_style()),
         ]);
@@ -587,7 +626,11 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.accent_style())
-        .title(Span::styled(modal_title, theme.primary_style()));
+        .title(Span::styled(
+            format!(" {} ", modal_title),
+            theme.primary_style(),
+        ))
+        .padding(Padding::horizontal(1));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
@@ -747,10 +790,11 @@ pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Plain)
         .border_style(theme.subtle_style())
         .title(Span::styled(
             format!(" {} ", tr(app.locale, TextKey::SummaryTitle)),
-            theme.primary_style(),
+            theme.accent_style(),
         ));
 
     let paragraph = Paragraph::new(vec![killer_line, survivor_line]).block(block);
@@ -767,8 +811,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     let is_narrow = f.area().width < STANDARD_WIDTH_BREAKPOINT;
+    let h_pad = if is_narrow { 1 } else { 2 };
 
-    // 2. Single outer border around the main application
+    // 2. Single outer border around the main application with internal horizontal padding
     let outer_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
@@ -776,7 +821,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .title(Span::styled(
             format!(" {} ", tr(app.locale, TextKey::HeaderTitle)),
             theme.accent_style(),
-        ));
+        ))
+        .padding(Padding::horizontal(h_pad));
     let inner_area = outer_block.inner(f.area());
     f.render_widget(outer_block, f.area());
 
@@ -804,11 +850,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     let mut constraints = vec![
         Constraint::Length(HEADER_HEIGHT), // 0: Header strip
-        Constraint::Length(table_height),  // 1: Table
     ];
     if show_summary {
-        constraints.push(Constraint::Length(SUMMARY_HEIGHT)); // 2: Summary card
+        constraints.push(Constraint::Length(SUMMARY_HEIGHT)); // 1: Hero Best Pick card
     }
+    constraints.push(Constraint::Min(table_height)); // Table
     constraints.push(Constraint::Length(FOOTER_HEIGHT)); // Footer
 
     let chunks = Layout::default()
@@ -816,12 +862,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         .constraints(constraints)
         .split(inner_area);
 
-    draw_header(f, app, &theme, chunks[0]);
-    draw_table(f, app, &theme, chunks[1], is_narrow);
     if show_summary {
-        draw_summary(f, app, &theme, chunks[2]);
+        draw_header(f, app, &theme, chunks[0]);
+        draw_summary(f, app, &theme, chunks[1]);
+        draw_table(f, app, &theme, chunks[2], is_narrow);
         draw_footer(f, app, &theme, chunks[3], is_narrow);
     } else {
+        draw_header(f, app, &theme, chunks[0]);
+        draw_table(f, app, &theme, chunks[1], is_narrow);
         draw_footer(f, app, &theme, chunks[2], is_narrow);
     }
 
@@ -1421,5 +1469,195 @@ mod tests {
             }
         }
         assert!(found_arrow, "Active sort order Ping must display 'Ping ▲'");
+    }
+
+    #[test]
+    fn test_border_margins_and_padding_prevent_border_collision() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec!["eu-central-1".to_string()],
+            Language::En,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            api::RegionQueueData::new("[IE]", "Dublin", "Standard", "12s", "8s"),
+        ];
+        app.pings.insert("eu-central-1".to_string(), 35);
+        app.pings.insert("eu-west-1".to_string(), 45);
+
+        // 1. Standard 80x24: Verify 2-space padding
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        // Line 1 is the header strip. Check that outer border is at x=0, and content starts at x=3.
+        let l1: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 1)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert_eq!(buffer[(0, 1)].symbol(), "│", "x=0 must be left border");
+        assert_eq!(buffer[(1, 1)].symbol(), " ", "x=1 must be padding");
+        assert_eq!(buffer[(2, 1)].symbol(), " ", "x=2 must be padding");
+        let sort_byte = l1.find("Sort:").expect("Header should contain 'Sort:'");
+        let sort_col = l1[..sort_byte].chars().count();
+        assert_eq!(
+            sort_col, 3,
+            "Header content must start at column 3 with 2 padding spaces"
+        );
+        assert_eq!(buffer[(79, 1)].symbol(), "│", "x=79 must be right border");
+
+        // Line 22 is footer strip. Verify padding on footer as well.
+        assert_eq!(buffer[(0, 22)].symbol(), "│", "x=0 must be left border");
+        assert_eq!(buffer[(1, 22)].symbol(), " ", "x=1 must be padding");
+        assert_eq!(buffer[(2, 22)].symbol(), " ", "x=2 must be padding");
+
+        // 2. Narrow 60x24: Verify 1-space padding
+        let backend_narrow = TestBackend::new(60, 24);
+        let mut term_narrow = Terminal::new(backend_narrow).unwrap();
+        term_narrow.draw(|f| draw(f, &mut app)).unwrap();
+        let buf_narrow = term_narrow.backend().buffer();
+
+        let l1_narrow: String = (0..buf_narrow.area.width)
+            .map(|x| buf_narrow[(x, 1)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert_eq!(buf_narrow[(0, 1)].symbol(), "│", "x=0 must be left border");
+        assert_eq!(buf_narrow[(1, 1)].symbol(), " ", "x=1 must be padding");
+        let sort_byte_narrow = l1_narrow
+            .find("Sort:")
+            .expect("Narrow header should contain 'Sort:'");
+        let sort_col_narrow = l1_narrow[..sort_byte_narrow].chars().count();
+        assert_eq!(
+            sort_col_narrow, 2,
+            "Narrow header content must start at column 2 with 1 padding space"
+        );
+    }
+
+    #[test]
+    fn test_table_and_summary_alignment_and_cohesion() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec!["eu-central-1".to_string()],
+            Language::En,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            api::RegionQueueData::new("[IE]", "Dublin", "Standard", "12s", "8s"),
+        ];
+        app.pings.insert("eu-central-1".to_string(), 35);
+        app.pings.insert("eu-west-1".to_string(), 45);
+
+        // 120x30 wide terminal: verify hero positioning, left alignment, and no massive gap
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        // Line 2 must be the Best Pick hero box top border
+        let l2: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 2)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            l2.contains("Best Pick"),
+            "Line 2 must contain 'Best Pick' hero section"
+        );
+        assert!(
+            l2.contains('┌'),
+            "Line 2 must contain top-left border of Best Pick"
+        );
+
+        let summary_left = l2.find('┌').unwrap();
+
+        // Line 6 must be the Table header
+        let l6: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 6)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            l6.contains("Region"),
+            "Line 6 must contain 'Region' table header"
+        );
+        let table_left = l6.find("Region").unwrap();
+
+        // Verify Best Pick and Table are horizontally aligned
+        assert_eq!(
+            summary_left, table_left,
+            "Best Pick card left edge must align with Table header left edge"
+        );
+
+        // Check line 9 (data row with Frankfurt): gap elimination
+        let l9: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 9)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        let reg_x = l9.find("[DE] Frankfurt").expect("Data row with Frankfurt");
+        let ping_x = l9.find("35 ms").expect("Data row with 35 ms");
+
+        let gap = ping_x - reg_x;
+        assert!(
+            gap < 35,
+            "Distance between Region and Ping must be balanced and cohesive (<35), got: {}",
+            gap
+        );
+        assert!(
+            gap > 10,
+            "Distance between Region and Ping should have proper spacing (>10), got: {}",
+            gap
+        );
+    }
+
+    #[test]
+    fn test_minimum_floor_48x12() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+        app.queues = vec![
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+            api::RegionQueueData::new("[IE]", "Dublin", "Standard", "12s", "8s"),
+        ];
+
+        let backend = TestBackend::new(48, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let mut found_header = false;
+        let mut found_table_row = false;
+        let mut found_footer = false;
+        for y in 0..buffer.area.height {
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                .collect();
+            if line.contains("Sort:") {
+                found_header = true;
+            }
+            if line.contains("Frankfurt") {
+                found_table_row = true;
+            }
+            if line.contains("nav") && line.contains("quit") {
+                found_footer = true;
+            }
+        }
+
+        assert!(
+            found_header,
+            "Header must be rendered at 48x12 minimum floor"
+        );
+        assert!(
+            found_table_row,
+            "Table row must be rendered at 48x12 minimum floor"
+        );
+        assert!(
+            found_footer,
+            "Footer must be rendered at 48x12 minimum floor"
+        );
     }
 }
