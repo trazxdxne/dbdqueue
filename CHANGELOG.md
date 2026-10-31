@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-10-31
+
+### Changed
+- Improved layout readability: added horizontal padding to terminal borders to prevent text collision.
+- Fixed table column distribution: eliminated excessive horizontal gaps on wide viewports by constraining metrics tightly to region names.
+- Redesigned "Best Pick" hero card: unified grid alignment with table header and added internal padding for visual breathing room.
+- Responsive narrow layout: hides summary card on terminals under 80 columns to maximize visible queue rows.
+
 ## [0.10.0] - 2026-10-31
 
 ### Added
