@@ -3,7 +3,7 @@ use crate::app::{App, NoticeKind, SPINNER_FRAMES};
 use crate::i18n::{TextKey, format_time_diff, tr, tr_mode, tr_sort, tr_time_format};
 use ratatui::{
     Frame,
-    layout::{Alignment, Constraint, Direction, Flex, Layout, Rect},
+    layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
@@ -164,16 +164,6 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
-}
-
-pub fn center_horizontally(area: Rect, width: u16) -> Rect {
-    if area.width < width {
-        area
-    } else {
-        Layout::horizontal([Constraint::Length(width)])
-            .flex(Flex::Center)
-            .split(area)[0]
-    }
 }
 
 fn pad_right(s: &str, width: usize) -> String {
@@ -498,10 +488,16 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
     ])
     .bottom_margin(1);
 
-    let table_area = if is_narrow {
-        center_horizontally(area, NARROW_TABLE_WIDTH)
+    let table_width = if is_narrow {
+        NARROW_TABLE_WIDTH
     } else {
-        center_horizontally(area, TABLE_WIDTH)
+        TABLE_WIDTH
+    };
+    let table_area = Rect {
+        x: area.x,
+        y: area.y,
+        width: table_width.min(area.width),
+        height: area.height,
     };
 
     let mut table = Table::new(rows, col_constraints)
@@ -707,12 +703,10 @@ pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         return;
     }
 
-    let centered_area = center_horizontally(area, TABLE_WIDTH);
-
     let summary_area = Rect {
-        x: centered_area.x,
-        y: centered_area.y,
-        width: centered_area.width,
+        x: area.x,
+        y: area.y,
+        width: TABLE_WIDTH.min(area.width),
         height: SUMMARY_HEIGHT,
     };
 
@@ -795,7 +789,8 @@ pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .title(Span::styled(
             format!(" {} ", tr(app.locale, TextKey::SummaryTitle)),
             theme.accent_style(),
-        ));
+        ))
+        .padding(Padding::horizontal(1));
 
     let paragraph = Paragraph::new(vec![killer_line, survivor_line]).block(block);
     f.render_widget(paragraph, summary_area);
@@ -1571,7 +1566,8 @@ mod tests {
             "Line 2 must contain top-left border of Best Pick"
         );
 
-        let summary_left = l2.find('┌').unwrap();
+        let summary_byte = l2.find('┌').unwrap();
+        let summary_col = l2[..summary_byte].chars().count();
 
         // Line 6 must be the Table header
         let l6: String = (0..buffer.area.width)
@@ -1581,12 +1577,28 @@ mod tests {
             l6.contains("Region"),
             "Line 6 must contain 'Region' table header"
         );
-        let table_left = l6.find("Region").unwrap();
+        let table_byte = l6.find("Region").unwrap();
+        let table_col = l6[..table_byte].chars().count();
 
-        // Verify Best Pick and Table are horizontally aligned
+        // Verify Best Pick, Table, and Header are horizontally aligned at column 3
         assert_eq!(
-            summary_left, table_left,
+            summary_col, table_col,
             "Best Pick card left edge must align with Table header left edge"
+        );
+        assert_eq!(
+            summary_col, 3,
+            "Best Pick and Table must start at column 3 with 2 outer padding spaces"
+        );
+
+        // Verify internal padding inside Best Pick card: 'Killer:' starts at column 5 (3 + 1 border + 1 pad)
+        let l3: String = (0..buffer.area.width)
+            .map(|x| buffer[(x, 3)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        let killer_byte = l3.find("Killer:").expect("Killer row inside Best Pick");
+        let killer_col = l3[..killer_byte].chars().count();
+        assert_eq!(
+            killer_col, 5,
+            "Internal padding inside Best Pick card must place content at column 5"
         );
 
         // Check line 9 (data row with Frankfurt): gap elimination
