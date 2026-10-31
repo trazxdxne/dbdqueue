@@ -1,6 +1,6 @@
 [package]
 name = "dbdqueue"
-version = "0.9.0"
+version = "0.10.0"
 edition = "2024"
 description = "Terminal queue times viewer and matchmaking region locker for Dead by Daylight"
 license = "MIT"

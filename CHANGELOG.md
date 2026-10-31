@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-10-31
+
+### Added
+- Overhauled TUI layout: single outer border frame, right-aligned numeric metrics with sort indicator arrows, and clean footer status strip.
+- Responsive terminal viewport: adaptive layouts for 80x24 standard terminals, 60-column narrow terminals, and an explicit floor warning on terminals under 48x12.
+- Terminal safety lifecycle: RAII TerminalGuard and global panic hook to reliably restore alternate screen and cursor state on aborts or unexpected errors.
+- Enhanced table navigation: vim keys (j/k), Home/End, and PageUp/PageDown scrolling; modal multi-select shortcuts (Space to select all, i to invert selection).
+- CLI ergonomics: added `--version` support and validated `clap::ValueEnum` parsing for `--mode`, `--sort`, and `-t, --time`.
+- Standard `NO_COLOR` environment support throughout all TUI styles and status badges.
+
+### Changed
+- Upgraded `crossterm` dependency to 0.29.
+- Hardened region locker: strict region token validation rejects unknown regions with exit code 1 to prevent empty whitelist lockouts.
+- Explicit CLI process exit codes: 0 on success, 1 on elevation/configuration error, 130 on interactive modal cancellation.
+- Elevated hosts modification hardened on Windows with PowerShell `-LiteralPath` and escaped paths, and direct write before `pkexec` fallback on Linux.
+- Offline test isolation: AWS live ping tests isolated with `#[ignore]` so tests run 100% offline in under 0.05s.
+
 ## [0.9.0] - 2026-09-18
 
 ### Added
