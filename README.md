@@ -3,226 +3,79 @@
 [![GitHub Release](https://img.shields.io/github/v/release/trazxdxne/dbdqueue?style=flat-square&color=f38ba8)](https://github.com/trazxdxne/dbdqueue/releases)
 [![CI Status](https://img.shields.io/github/actions/workflow/status/trazxdxne/dbdqueue/ci.yml?branch=master&style=flat-square&label=ci)](https://github.com/trazxdxne/dbdqueue/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![Rust Edition](https://img.shields.io/badge/Rust-2024%20edition-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-2024-dea584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-lightgrey?style=flat-square)](https://github.com/trazxdxne/dbdqueue/releases)
 
 <p align="center">
-  <b>Language / Язык:</b>&nbsp;
   <kbd><b>English</b></kbd>&nbsp;•&nbsp;<a href="README.ru.md"><kbd>Русский</kbd></a>
 </p>
 
-> [!IMPORTANT]
-> **Legal Notice & Trademark Disclaimer**
-> Dead By Queue is an independent, community-developed open-source utility utilizing the public `deadbyqueue.com` API. It is **not affiliated with, endorsed by, sponsored by, or partnered with** Behaviour Interactive Inc., Amazon Web Services, Inc. (AWS), or `deadbyqueue.com`.
-> *"Dead by Daylight"* is a registered trademark of Behaviour Interactive Inc. *"AWS"* and related marks are trademarks of Amazon.com, Inc. or its affiliates. All regional routing controls modify local OS network resolution only. See [LICENSE](LICENSE) for full legal terms and limitation of liability.
-
----
-
-A fast, zero-dependency native terminal dashboard (TUI) for Dead by Daylight players. Dead By Queue displays live matchmaking queue times and server latencies across all global AWS datacenters, features an intelligent role-aware recommendation engine, and empowers players with integrated region locking to eliminate high-ping or undesirable matchmaking pools.
+Terminal queue viewer, AWS latency monitor, and region locker for Dead by Daylight, written in Rust with `ratatui`.
 
 <p align="center">
-  <img src="assets/dashboard.svg" alt="Dead By Queue Terminal Dashboard" width="100%">
+  <img src="assets/dashboard.svg" alt="Dead By Queue TUI" width="100%">
 </p>
 
----
+> Unofficial community tool using the public `deadbyqueue.com` API. Not affiliated with Behaviour Interactive, AWS, or `deadbyqueue.com`. Region locking only modifies your local `hosts` file. See [LICENSE](LICENSE).
 
 ## Features
 
-### Real-Time Ratatui Terminal Interface
-- **Pure Native Performance**: Written entirely in Rust with `ratatui` and `crossterm`—no Node.js, Electron, or external runtime required.
-- **Instant Startup & Ping Caching**: Cached AWS latencies (`cache.json`) load immediately on launch while live API queue times, events, and 1-RTT HTTP/1.1 Keep-Alive pings refresh in the background.
-- **Adaptive Layout**: Single outer border frame with unified grid alignment between the **Best Pick** hero card and queue table, active sort column highlights (`▲`), locked region badges (`●` / `Active (N)`), vertical scrollbars for overflowing lists, and responsive layouts down to a `48x12` minimum terminal floor.
-- **In-Game Event Tracking**: Event mode (`[M]`) displays live event countdowns in the header and upcoming event schedules when event queues are inactive.
-- **Intuitive Time Formatting**: Toggle instantly between **Exact** (e.g. `0:53`, `4:54`, `1:52:31`) and **Rounded** (e.g. `53s`, `5m`, `2h`) modes with `[T]` to suit your preferred view.
-- **Accurate Refresh Timestamps & `NO_COLOR` Support**: Shows the exact age of source data from the API and respects the standard `NO_COLOR` environment variable across all TUI styles.
+- **Live queues & ping**: Fetches Standard/Event queue times and measures 1-RTT HTTP Keep-Alive latency to all 15 AWS regions, starting instantly from `cache.json`.
+- **Best Pick**: Scores active regions by `wait + ping_penalty(role)` (Killers tolerate higher ping than Survivors) and flags `+N similar` options (`±25 ms`, `±15 s`).
+- **Region Locker**: Whitelist preferred regions in the TUI (`l`) or CLI (`dbdq lock`) via local `hosts` routing (UAC on Windows, `pkexec`/root on Linux).
+- **Event mode**: Shows active event countdowns in the header and upcoming event schedules when event queues are offline (`m`).
+- **TUI ergonomics**: Single-frame adaptive layout down to `48x12`, `Exact` / `~Rounded` times (`t`), Latin & Cyrillic keybindings, mouse wheel scroll, and `NO_COLOR`.
 
-### Role-Aware Recommendation Engine ("Best Pick")
-Instead of naively selecting the shortest queue time, `dbdq` computes a role-sensitive composite score balancing queue wait times against network latency:
-
-$$\text{Score} = \text{Wait Time (seconds)} + \text{Latency Penalty}(\text{Ping}, \text{Role})$$
-
-- **Role-Specific Latency Penalties**:
-  - **Killers** (host-authoritative hit validation): Penalties apply gradually above $70\text{ ms}$, escalating sharply only beyond $140\text{ ms}$.
-  - **Survivors** (tight reaction windows for fast vaults and skill checks): Latency penalties begin scaling earlier at $60\text{ ms}$, with heavy penalties above $90\text{ ms}$.
-- **`+N similar` Detection**: Indicates when alternative regions offer comparable performance within $\pm 25\text{ ms}$ latency and $\pm 15\text{ s}$ queue duration.
-- **Data Integrity**: Unmeasured ping regions and disabled game servers are automatically excluded from recommendation scoring.
-
-### AWS Matchmaking Region Locker
-- **Local Firewall & Routing Filter**: Whitelist your preferred server regions (`l` in TUI or `dbdq lock [regions]`) while blocking undesirable remote regions.
-- **Dedicated Interactive CLI Menu**: Running `dbdq lock` opens a flicker-free Ratatui modal on the alternate screen buffer with smooth keyboard navigation and scrolling, leaving the terminal completely clean upon exit.
-- **Zero In-Game Overhead**: Operates entirely through OS-level hosts routing—no packet injection, memory tampering, or VPN overhead.
-- **Non-Blocking Elevation**: Administrative/UAC elevation prompts execute off the main event loop so the UI remains fluid and responsive.
-
-### Non-Blocking Background Refresh
-- **Parallel Network Workers**: Background threads fetch queue times and measure 1-RTT HTTP/1.1 Keep-Alive ping probes without blocking the interactive UI.
-- **Live Visual Feedback**: Features an animated braille spinner (`⠋ Fetching...`) in the status bar during refresh cycles and auto-expiring status confirmations (`[✓ Updated]`).
-
-### Multi-Layout Keyboard Support
-- Fully functional across international keyboard layouts. All shortcuts seamlessly operate on Latin, Cyrillic (Russian), and other layouts without requiring layout switching.
-
-### Persistent Dual-Platform Configuration
-- Preferences (sorting mode, active game mode, locked regions) automatically persist across sessions:
-  - **Linux**: `~/.config/dbdqueue/config.toml`
-  - **Windows**: `%APPDATA%\dbdqueue\config.toml`
-
----
-
-## Installation & Quick Start
-
-### Windows (PowerShell)
-Install and launch `dbdq` with a single command:
-```powershell
-irm https://raw.githubusercontent.com/trazxdxne/dbdqueue/master/install.ps1 | iex
-```
-*Downloads the latest release binary into `%LOCALAPPDATA%\Programs\dbdqueue`, configures your user `PATH`, and launches the dashboard.*
-
-### Linux (Bash)
-Install and launch `dbdq` with a single command:
-```bash
-curl -fsSL https://raw.githubusercontent.com/trazxdxne/dbdqueue/master/install.sh | bash
-```
-*Detects your system architecture (`x86_64` or `aarch64`), installs the binary to `/usr/local/bin` (or `~/.local/bin`), and starts the dashboard.*
-
----
-
-## Pre-Built Binaries & Archives
-
-Release archives and standalone binaries are available on the [GitHub Releases](https://github.com/trazxdxne/dbdqueue/releases) page:
-
-| Platform | Architecture | Distribution Archive | Standalone Binary |
-| :--- | :--- | :--- | :--- |
-| **Linux** | `x86_64` | `dbdq-linux-x86_64.tar.gz` | `dbdq-linux-x86_64` |
-| **Linux** | `aarch64` | `dbdq-linux-aarch64.tar.gz` | `dbdq-linux-aarch64` |
-| **Windows** | `x64` | `dbdq-windows-x64.zip` | `dbdq-windows-x64.exe` |
-
-### Integrity Verification
-Every release includes an official `SHA256SUMS.txt` file containing cryptographic checksums for all distribution assets. To verify your download:
-
-**Linux / macOS:**
-```bash
-sha256sum -c SHA256SUMS.txt --ignore-missing
-```
+## Install
 
 **Windows (PowerShell):**
 ```powershell
-Get-FileHash -Algorithm SHA256 dbdq-windows-x64.zip
+irm https://raw.githubusercontent.com/trazxdxne/dbdqueue/master/install.ps1 | iex
 ```
 
----
-
-## Build from Source
-
-Ensure you have the latest stable Rust toolchain installed (`rustup update`).
-
+**Linux (Bash):**
 ```bash
-# Clone the repository
-git clone https://github.com/trazxdxne/dbdqueue.git
-cd dbdqueue
-
-# Build optimized release binary
-cargo build --release
-
-# The compiled binary will be located at:
-# Linux:   target/release/dbdq
-# Windows: target\release\dbdq.exe
+curl -fsSL https://raw.githubusercontent.com/trazxdxne/dbdqueue/master/install.sh | bash
 ```
 
-Or install directly into your Cargo bin directory:
-```bash
-cargo install --path .
-```
-
----
+**Manual / Source:**
+- Download `dbdq-windows-x64.exe` / `.zip` or `dbdq-linux-{x86_64,aarch64}` / `.tar.gz` (plus `SHA256SUMS.txt`) from [Releases](https://github.com/trazxdxne/dbdqueue/releases).
+- Or build with Rust: `cargo install --git https://github.com/trazxdxne/dbdqueue`
 
 ## Usage
 
-Launch the interactive dashboard:
+Run `dbdq` to open the TUI, or pass flags/subcommands:
+
 ```bash
-dbdq
+dbdq --sort killer|survivor|ping|default
+dbdq --mode standard|event
+dbdq --time exact|rounded
+dbdq lock [regions...]   # opens interactive picker if empty (e.g. dbdq lock frankfurt dublin)
+dbdq unlock              # clears all region locks
 ```
 
-### Keyboard & Mouse Controls
+### Controls
 
 | Input | Action |
 | :--- | :--- |
-| `↑` / `↓` / `j` / `k` / Mouse Wheel | Select / scroll table or modal rows |
-| `Home` / `End` / `PgUp` / `PgDn` | Jump to first/last row or page scroll |
-| `l` | Open **Region Locker** modal |
-| `Space` / `a` / `i` | *(In modal)* Toggle region, select/deselect all, or invert selection |
-| `Enter` | *(In modal)* Apply region locks (0 selected unlocks all in TUI) |
-| `s` | Cycle sorting mode (`Killer` → `Survivor` → `Ping`) |
-| `m` | Toggle game mode filter (`Standard` ↔ `Event`) |
-| `t` | Toggle queue time format (`Exact` ↔ `~Rounded`) |
-| `r` | Trigger immediate background data & ping refresh |
-| `Esc` / `q` / `Ctrl+C` | Close modal dialog or quit application |
+| `↑` `↓` / `j` `k` / Scroll | Move selection |
+| `Home` / `End` / `PgUp` / `PgDn` | Jump / page scroll |
+| `l` | Open Region Locker (`Space` toggle, `a` all, `i` invert, `Enter` apply) |
+| `s` / `m` / `t` | Cycle sort / toggle mode / toggle time format |
+| `r` | Refresh queues, events, and pings |
+| `q` / `Esc` / `Ctrl+C` | Close modal or quit |
 
-### CLI Subcommands & Flags
+## Config
 
-You can bypass the TUI or preset initial options directly from the command line:
-
-```bash
-# Launch with specific initial sorting
-dbdq --sort ping
-dbdq --sort killer
-dbdq --sort survivor
-
-# Filter by matchmaking mode
-dbdq --mode standard
-dbdq --mode event
-
-# Set queue duration display mode
-dbdq --time exact
-dbdq --time rounded
-
-# Lock to specific AWS regions (blocks all other matchmaking regions)
-dbdq lock frankfurt dublin
-
-# Interactive CLI region locking menu
-dbdq lock
-
-# Revert all region locks and restore default matchmaking
-dbdq unlock
-# Show version
-dbdq --version
-```
-
----
-
-## Configuration
-
-Settings are saved in TOML format:
+Stored at `~/.config/dbdqueue/config.toml` (Linux) or `%APPDATA%\dbdqueue\config.toml` (Windows), with ping cache in `cache.json`:
 
 ```toml
-mode = "standard"             # "standard" or "event"
-sort = "killer"               # "killer", "survivor", "ping", or "default"
-time_format = "exact"         # "exact" or "rounded"
-locked = ["eu-central-1"]     # Whitelisted AWS region codes
-lang = "auto"                 # "auto", "en", or "ru"
-# api_url = "https://..."     # Optional custom queue API endpoint
+mode = "standard"             # "standard" | "event"
+sort = "killer"               # "default" | "killer" | "survivor" | "ping"
+time_format = "exact"         # "exact" | "rounded"
+locked = ["eu-central-1"]
+lang = "auto"                 # "auto" | "en" | "ru"
+# api_url = "https://..."     # custom queue API endpoint
 ```
 
-- **Linux**: `~/.config/dbdqueue/config.toml`
-- **Windows**: `%APPDATA%\dbdqueue\config.toml`
-
-Environment variables are also supported:
-- `DBD_API_URL`: Override API endpoint with a custom mirror.
-- `HTTP_PROXY` / `HTTPS_PROXY`: Standard HTTP/HTTPS proxy routing.
-- `NO_COLOR`: Disable ANSI colors in the TUI when set to a non-empty value.
-
----
-
-## Specifications
-
-- **Language**: 100% Rust (2024 Edition)
-- **TUI Framework**: `ratatui` (v0.30+) & `crossterm` (v0.29+)
-- **HTTP Client**: `ureq` (v2.9+) with TLS connection pooling
-- **CLI Engine**: `clap` (v4.4+) with derive macros
-- **Serialization & Locale**: `serde`, `serde_json`, `toml`, `chrono`, `sys-locale`
-- **Supported Operating Systems**: Linux (x86_64, aarch64), Windows (x64)
-
----
-
-<p align="center">
-  <a href="README.ru.md">Читать на русском языке (README.ru.md)</a>
-</p>
-
+Environment variables: `DBD_API_URL`, `HTTP_PROXY` / `HTTPS_PROXY`, `NO_COLOR`.
