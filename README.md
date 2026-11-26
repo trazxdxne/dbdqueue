@@ -30,9 +30,11 @@ A fast, zero-dependency native terminal dashboard (TUI) for Dead by Daylight pla
 
 ### Real-Time Ratatui Terminal Interface
 - **Pure Native Performance**: Written entirely in Rust with `ratatui` and `crossterm`—no Node.js, Electron, or external runtime required.
-- **Adaptive Layout**: Automatically centers tables and guarantees that the **Best Pick** panel, header, and footer controls remain fully visible on standard $80 \times 24$ (and $\ge 14$) viewports with smooth table row scrolling.
+- **Instant Startup & Ping Caching**: Cached AWS latencies (`cache.json`) load immediately on launch while live API queue times, events, and 1-RTT HTTP/1.1 Keep-Alive pings refresh in the background.
+- **Adaptive Layout**: Single outer border frame with unified grid alignment between the **Best Pick** hero card and queue table, active sort column highlights (`▲`), locked region badges (`●` / `Active (N)`), vertical scrollbars for overflowing lists, and responsive layouts down to a `48x12` minimum terminal floor.
+- **In-Game Event Tracking**: Event mode (`[M]`) displays live event countdowns in the header and upcoming event schedules when event queues are inactive.
 - **Intuitive Time Formatting**: Toggle instantly between **Exact** (e.g. `0:53`, `4:54`, `1:52:31`) and **Rounded** (e.g. `53s`, `5m`, `2h`) modes with `[T]` to suit your preferred view.
-- **Accurate Refresh Timestamps**: Shows the exact age of source data from the API rather than just local poll times.
+- **Accurate Refresh Timestamps & `NO_COLOR` Support**: Shows the exact age of source data from the API and respects the standard `NO_COLOR` environment variable across all TUI styles.
 
 ### Role-Aware Recommendation Engine ("Best Pick")
 Instead of naively selecting the shortest queue time, `dbdq` computes a role-sensitive composite score balancing queue wait times against network latency:
@@ -139,17 +141,20 @@ Launch the interactive dashboard:
 dbdq
 ```
 
-### Keyboard Shortcuts
+### Keyboard & Mouse Controls
 
-| Key | Action |
+| Input | Action |
 | :--- | :--- |
-| `↑` / `↓` | Select / scroll table rows |
+| `↑` / `↓` / `j` / `k` / Mouse Wheel | Select / scroll table or modal rows |
+| `Home` / `End` / `PgUp` / `PgDn` | Jump to first/last row or page scroll |
 | `l` | Open **Region Locker** modal |
+| `Space` / `a` / `i` | *(In modal)* Toggle region, select/deselect all, or invert selection |
+| `Enter` | *(In modal)* Apply region locks (0 selected unlocks all in TUI) |
 | `s` | Cycle sorting mode (`Killer` → `Survivor` → `Ping`) |
 | `m` | Toggle game mode filter (`Standard` ↔ `Event`) |
 | `t` | Toggle queue time format (`Exact` ↔ `~Rounded`) |
 | `r` | Trigger immediate background data & ping refresh |
-| `Esc` | Close modal dialog or quit application |
+| `Esc` / `q` / `Ctrl+C` | Close modal dialog or quit application |
 
 ### CLI Subcommands & Flags
 
@@ -177,6 +182,8 @@ dbdq lock
 
 # Revert all region locks and restore default matchmaking
 dbdq unlock
+# Show version
+dbdq --version
 ```
 
 ---
@@ -186,11 +193,12 @@ dbdq unlock
 Settings are saved in TOML format:
 
 ```toml
-mode = "Standard"       # "Standard" or "Event"
-sort = "Killer"         # "Killer", "Survivor", "Ping", or "Default"
-time_format = "exact"   # "exact" or "rounded"
-locked = ["eu-central-1"] # Whitelisted AWS region codes
-lang = "auto"           # "auto", "en", or "ru"
+mode = "standard"             # "standard" or "event"
+sort = "killer"               # "killer", "survivor", "ping", or "default"
+time_format = "exact"         # "exact" or "rounded"
+locked = ["eu-central-1"]     # Whitelisted AWS region codes
+lang = "auto"                 # "auto", "en", or "ru"
+# api_url = "https://..."     # Optional custom queue API endpoint
 ```
 
 - **Linux**: `~/.config/dbdqueue/config.toml`
@@ -199,16 +207,17 @@ lang = "auto"           # "auto", "en", or "ru"
 Environment variables are also supported:
 - `DBD_API_URL`: Override API endpoint with a custom mirror.
 - `HTTP_PROXY` / `HTTPS_PROXY`: Standard HTTP/HTTPS proxy routing.
+- `NO_COLOR`: Disable ANSI colors in the TUI when set to a non-empty value.
 
 ---
 
 ## Specifications
 
 - **Language**: 100% Rust (2024 Edition)
-- **TUI Framework**: `ratatui` (v0.30+) & `crossterm` (v0.27+)
+- **TUI Framework**: `ratatui` (v0.30+) & `crossterm` (v0.29+)
 - **HTTP Client**: `ureq` (v2.9+) with TLS connection pooling
 - **CLI Engine**: `clap` (v4.4+) with derive macros
-- **Serialization**: `serde` & `serde_json`, `toml`
+- **Serialization & Locale**: `serde`, `serde_json`, `toml`, `chrono`, `sys-locale`
 - **Supported Operating Systems**: Linux (x86_64, aarch64), Windows (x64)
 
 ---
