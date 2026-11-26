@@ -144,11 +144,19 @@ impl Role {
         match self {
             Role::Killer => row.killer_secs.or_else(|| {
                 let s = api::parse_time_to_seconds(&row.killer);
-                if s < 999999 { Some(s) } else { None }
+                if s < api::UNKNOWN_TIME_SECS {
+                    Some(s)
+                } else {
+                    None
+                }
             }),
             Role::Survivor => row.survivor_secs.or_else(|| {
                 let s = api::parse_time_to_seconds(&row.survivor);
-                if s < 999999 { Some(s) } else { None }
+                if s < api::UNKNOWN_TIME_SECS {
+                    Some(s)
+                } else {
+                    None
+                }
             }),
         }
     }
@@ -177,6 +185,7 @@ pub struct App {
     pub notice: Option<Notice>,
     pub should_quit: bool,
     pub is_fetching: bool,
+    pub is_manual_refreshing: bool,
     pub table_state: TableState,
     pub show_lock_modal: bool,
     pub lock_modal_selected: Vec<String>,
@@ -210,6 +219,7 @@ impl App {
             notice: None,
             should_quit: false,
             is_fetching: true,
+            is_manual_refreshing: false,
             table_state: TableState::default(),
             show_lock_modal: false,
             lock_modal_selected: Vec::new(),
@@ -243,8 +253,19 @@ impl App {
         }
     }
 
+    fn matches_mode(&self, row: &RegionQueueData) -> bool {
+        match self.mode {
+            GameMode::Standard => row.mode == "Standard",
+            GameMode::Event => row.mode == "Event",
+        }
+    }
+
+    pub fn filtered_row_count(&self) -> usize {
+        self.queues.iter().filter(|r| self.matches_mode(r)).count()
+    }
+
     pub fn move_selection(&mut self, direction: Direction) {
-        let total = self.get_filtered_sorted_rows().len();
+        let total = self.filtered_row_count();
         if total == 0 {
             self.table_state.select(None);
             return;
@@ -286,7 +307,7 @@ impl App {
     }
 
     pub fn select_first(&mut self) {
-        let total = self.get_filtered_sorted_rows().len();
+        let total = self.filtered_row_count();
         if total > 0 {
             self.table_state.select(Some(0));
         } else {
@@ -295,7 +316,7 @@ impl App {
     }
 
     pub fn select_last(&mut self) {
-        let total = self.get_filtered_sorted_rows().len();
+        let total = self.filtered_row_count();
         if total > 0 {
             self.table_state.select(Some(total.saturating_sub(1)));
         } else {
@@ -304,7 +325,7 @@ impl App {
     }
 
     pub fn select_page_up(&mut self) {
-        let total = self.get_filtered_sorted_rows().len();
+        let total = self.filtered_row_count();
         if total == 0 {
             self.table_state.select(None);
             return;
@@ -319,7 +340,7 @@ impl App {
     }
 
     pub fn select_page_down(&mut self) {
-        let total = self.get_filtered_sorted_rows().len();
+        let total = self.filtered_row_count();
         if total == 0 {
             self.table_state.select(None);
             return;
@@ -331,7 +352,7 @@ impl App {
     }
 
     pub fn clamp_selection(&mut self) {
-        let total = self.get_filtered_sorted_rows().len();
+        let total = self.filtered_row_count();
         if total == 0 {
             self.table_state.select(None);
         } else if let Some(sel) = self.table_state.selected()
@@ -448,14 +469,12 @@ impl App {
     }
 
     pub fn lock_modal_invert(&mut self) {
-        let regions = self.get_modal_regions();
-        let mut inverted = Vec::new();
-        for r in regions {
-            let r_str = r.to_string();
-            if !self.lock_modal_selected.contains(&r_str) {
-                inverted.push(r_str);
-            }
-        }
+        let mut inverted: Vec<String> = self
+            .get_modal_regions()
+            .into_iter()
+            .filter(|r| !self.lock_modal_selected.iter().any(|s| s == *r))
+            .map(str::to_string)
+            .collect();
         inverted.sort();
         self.lock_modal_selected = inverted;
     }
@@ -548,6 +567,7 @@ impl App {
                 'r' => {
                     if !self.is_fetching {
                         self.is_fetching = true;
+                        self.is_manual_refreshing = true;
                         self.notice = None;
                         AppAction::Refresh
                     } else {
@@ -665,6 +685,7 @@ impl App {
     ) {
         self.handle_misc_update(misc_res);
         self.is_fetching = false;
+        self.is_manual_refreshing = false;
         for (reg, ms) in ping_res {
             self.pings.insert(reg, ms);
         }
@@ -695,6 +716,9 @@ impl App {
     }
 
     pub fn handle_api_update(&mut self, res: Result<(Vec<RegionQueueData>, i64), String>) {
+        if !self.is_manual_refreshing {
+            self.is_fetching = false;
+        }
         match res {
             Ok((mut queues, last_updated)) => {
                 for q in &mut queues {
@@ -734,10 +758,7 @@ impl App {
         let mut filtered: Vec<&RegionQueueData> = self
             .queues
             .iter()
-            .filter(|r| match self.mode {
-                GameMode::Standard => r.mode == "Standard",
-                GameMode::Event => r.mode == "Event",
-            })
+            .filter(|r| self.matches_mode(r))
             .collect();
 
         match self.sort {
@@ -745,7 +766,9 @@ impl App {
                 filtered.sort_by_cached_key(|r| {
                     (
                         r.is_disabled(),
-                        Role::Survivor.queue_time_secs(r).unwrap_or(999999),
+                        Role::Survivor
+                            .queue_time_secs(r)
+                            .unwrap_or(api::UNKNOWN_TIME_SECS),
                         &r.name,
                     )
                 });
@@ -754,7 +777,9 @@ impl App {
                 filtered.sort_by_cached_key(|r| {
                     (
                         r.is_disabled(),
-                        Role::Killer.queue_time_secs(r).unwrap_or(999999),
+                        Role::Killer
+                            .queue_time_secs(r)
+                            .unwrap_or(api::UNKNOWN_TIME_SECS),
                         &r.name,
                     )
                 });
@@ -809,7 +834,7 @@ impl App {
                 let Some(secs) = role.queue_time_secs(row) else {
                     continue;
                 };
-                if secs >= 999999 {
+                if secs >= api::UNKNOWN_TIME_SECS {
                     continue;
                 }
                 let ping = get_ping(row)?;
@@ -1599,5 +1624,59 @@ mod tests {
 
         app.handle_page_up();
         assert_eq!(app.lock_modal_cursor, 0);
+    }
+
+    #[test]
+    fn test_handle_api_update_clears_is_fetching_and_allows_retry() {
+        let mut app = make_test_app();
+        assert!(app.is_fetching);
+
+        // Initial error clears is_fetching so user can press 'r' to retry
+        app.handle_api_update(Err("network timeout".to_string()));
+        assert!(!app.is_fetching);
+        assert_eq!(app.notice.as_ref().map(|n| n.kind), Some(NoticeKind::Error));
+        assert_eq!(app.handle_key('r'), AppAction::Refresh);
+        assert!(app.is_fetching);
+        assert!(app.is_manual_refreshing);
+
+        // Background ApiUpdate during manual refresh preserves spinner until ManualRefreshComplete
+        app.notice = Some(Notice::error("previous error"));
+        app.handle_api_update(Ok((
+            vec![RegionQueueData::new(
+                "[DE]",
+                "Frankfurt",
+                "Standard",
+                "10s",
+                "5s",
+            )],
+            12345,
+        )));
+        assert!(app.is_fetching);
+        assert!(app.notice.is_none());
+        assert_eq!(app.filtered_row_count(), 1);
+
+        // ManualRefreshComplete clears both flags
+        app.handle_manual_refresh_complete(
+            Ok((
+                vec![RegionQueueData::new(
+                    "[DE]",
+                    "Frankfurt",
+                    "Standard",
+                    "10s",
+                    "5s",
+                )],
+                12345,
+            )),
+            HashMap::new(),
+            Err("unused".to_string()),
+            Instant::now(),
+        );
+        assert!(!app.is_fetching);
+        assert!(!app.is_manual_refreshing);
+
+        // Initial ApiUpdate(Ok) when not manually refreshing clears is_fetching
+        let mut app2 = make_test_app();
+        app2.handle_api_update(Ok((vec![], 100)));
+        assert!(!app2.is_fetching);
     }
 }

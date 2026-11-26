@@ -2,6 +2,7 @@ use crossterm::{
     cursor,
     event::{
         self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
@@ -71,9 +72,9 @@ impl Drop for TerminalGuard {
 
 pub enum AppEvent {
     Input(KeyEvent),
+    Scroll(crate::app::Direction),
     Tick,
-    #[allow(dead_code)]
-    Resize(u16, u16),
+    Resize,
     ApiUpdate(Result<(Vec<crate::api::RegionQueueData>, i64), String>),
     PingUpdate(std::collections::HashMap<String, u32>),
     MiscUpdate(Result<crate::api::MiscResponse, String>),
@@ -88,10 +89,7 @@ pub enum AppEvent {
     },
 }
 
-pub fn run_app(
-    mut app: crate::app::App,
-    config_path: PathBuf,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_app(mut app: crate::app::App, config_path: PathBuf) -> io::Result<()> {
     install_panic_hook();
     let _guard = TerminalGuard::enter()?;
 
@@ -99,6 +97,7 @@ pub fn run_app(
     let mut terminal = Terminal::new(backend)?;
 
     let cache_path = crate::cache::get_cache_path(&config_path);
+    let api_url = crate::api::resolve_api_url(app.api_url.as_deref());
 
     let (tx, rx) = mpsc::channel();
     let tick_rate = Duration::from_millis(250);
@@ -115,21 +114,36 @@ pub fn run_app(
             if event::poll(timeout).unwrap_or(false) {
                 match event::read() {
                     Ok(Event::Key(key)) => {
-                        if key.kind == crossterm::event::KeyEventKind::Press
-                            || key.kind == crossterm::event::KeyEventKind::Repeat
+                        if (key.kind == crossterm::event::KeyEventKind::Press
+                            || key.kind == crossterm::event::KeyEventKind::Repeat)
+                            && tx_input.send(AppEvent::Input(key)).is_err()
                         {
-                            tx_input.send(AppEvent::Input(key)).unwrap_or(());
+                            break;
                         }
                     }
-                    Ok(Event::Resize(w, h)) => {
-                        tx_input.send(AppEvent::Resize(w, h)).unwrap_or(());
+                    Ok(Event::Mouse(mouse)) => {
+                        let dir = match mouse.kind {
+                            MouseEventKind::ScrollUp => Some(crate::app::Direction::Up),
+                            MouseEventKind::ScrollDown => Some(crate::app::Direction::Down),
+                            _ => None,
+                        };
+                        if let Some(d) = dir
+                            && tx_input.send(AppEvent::Scroll(d)).is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Ok(Event::Resize(_, _)) if tx_input.send(AppEvent::Resize).is_err() => {
+                        break;
                     }
                     _ => {}
                 }
             }
 
             if last_tick.elapsed() >= tick_rate {
-                tx_input.send(AppEvent::Tick).unwrap_or(());
+                if tx_input.send(AppEvent::Tick).is_err() {
+                    break;
+                }
                 last_tick = std::time::Instant::now();
             }
         }
@@ -137,10 +151,13 @@ pub fn run_app(
 
     // Fetch thread (every 60s)
     let tx_api = tx.clone();
+    let api_url_bg = api_url.clone();
     thread::spawn(move || {
         loop {
-            let res = crate::api::fetch_queue_times();
-            tx_api.send(AppEvent::ApiUpdate(res)).unwrap_or(());
+            let res = crate::api::fetch_queue_times_from(&api_url_bg);
+            if tx_api.send(AppEvent::ApiUpdate(res)).is_err() {
+                break;
+            }
             thread::sleep(Duration::from_secs(60));
         }
     });
@@ -150,7 +167,9 @@ pub fn run_app(
     thread::spawn(move || {
         loop {
             let pings = crate::ping::measure_all_regions_ping();
-            tx_ping.send(AppEvent::PingUpdate(pings)).unwrap_or(());
+            if tx_ping.send(AppEvent::PingUpdate(pings)).is_err() {
+                break;
+            }
             thread::sleep(Duration::from_secs(60));
         }
     });
@@ -160,7 +179,9 @@ pub fn run_app(
     thread::spawn(move || {
         loop {
             let res = crate::api::fetch_misc_data();
-            tx_misc.send(AppEvent::MiscUpdate(res)).unwrap_or(());
+            if tx_misc.send(AppEvent::MiscUpdate(res)).is_err() {
+                break;
+            }
             thread::sleep(Duration::from_secs(60));
         }
     });
@@ -172,8 +193,10 @@ pub fn run_app(
             crate::app::AppAction::None => {}
             crate::app::AppAction::Refresh => {
                 let tx_refresh = tx.clone();
+                let refresh_url = api_url.clone();
                 thread::spawn(move || {
-                    let api_handle = thread::spawn(crate::api::fetch_queue_times);
+                    let api_handle =
+                        thread::spawn(move || crate::api::fetch_queue_times_from(&refresh_url));
                     let ping_handle = thread::spawn(crate::ping::measure_all_regions_ping);
                     let misc_handle = thread::spawn(crate::api::fetch_misc_data);
                     let api_res = api_handle
@@ -183,13 +206,11 @@ pub fn run_app(
                     let misc_res = misc_handle
                         .join()
                         .unwrap_or_else(|_| Err("Misc fetch thread error".to_string()));
-                    tx_refresh
-                        .send(AppEvent::ManualRefreshComplete {
-                            api_res,
-                            ping_res,
-                            misc_res,
-                        })
-                        .unwrap_or(());
+                    let _ = tx_refresh.send(AppEvent::ManualRefreshComplete {
+                        api_res,
+                        ping_res,
+                        misc_res,
+                    });
                 });
             }
             crate::app::AppAction::SaveConfig(cfg) => {
@@ -207,12 +228,10 @@ pub fn run_app(
                         Some(regions.as_slice())
                     };
                     let res = crate::hosts::update_hosts(lock_target, false);
-                    tx_hosts
-                        .send(AppEvent::HostsUpdateComplete {
-                            result: res,
-                            locked: regions,
-                        })
-                        .unwrap_or(());
+                    let _ = tx_hosts.send(AppEvent::HostsUpdateComplete {
+                        result: res,
+                        locked: regions,
+                    });
                 });
             }
         }
@@ -233,7 +252,11 @@ pub fn run_app(
                         }
 
                         match key.code {
-                            KeyCode::Char(c) => {
+                            KeyCode::Char(c)
+                                if !key
+                                    .modifiers
+                                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                            {
                                 let action = app.handle_key(c);
                                 dispatch_action(action, &mut app, &tx);
                             }
@@ -251,10 +274,14 @@ pub fn run_app(
                             _ => {}
                         }
                     }
+                    AppEvent::Scroll(dir) => match dir {
+                        crate::app::Direction::Up => app.handle_up(),
+                        crate::app::Direction::Down => app.handle_down(),
+                    },
                     AppEvent::Tick => {
                         app.on_tick(std::time::Instant::now());
                     }
-                    AppEvent::Resize(_, _) => {
+                    AppEvent::Resize => {
                         // Terminal resize triggers redraw at the top of loop
                     }
                     AppEvent::ManualRefreshComplete {

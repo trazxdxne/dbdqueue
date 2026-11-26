@@ -3,6 +3,8 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+pub const UNKNOWN_TIME_SECS: u32 = 999_999;
+
 pub static API_TO_AWS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     m.insert("Frankfurt", "eu-central-1");
@@ -122,13 +124,13 @@ impl RegionQueueData {
             None
         } else {
             let s = parse_time_to_seconds(&surv);
-            if s < 999999 { Some(s) } else { None }
+            if s < UNKNOWN_TIME_SECS { Some(s) } else { None }
         };
         let kill_secs = if kill == "—" {
             None
         } else {
             let k = parse_time_to_seconds(&kill);
-            if k < 999999 { Some(k) } else { None }
+            if k < UNKNOWN_TIME_SECS { Some(k) } else { None }
         };
         Self {
             flag: flag.into(),
@@ -148,13 +150,13 @@ impl RegionQueueData {
     pub fn reformat(&mut self, format: TimeFormat) {
         if self.survivor_secs.is_none() && self.survivor != "—" {
             let s = parse_time_to_seconds(&self.survivor);
-            if s < 999999 {
+            if s < UNKNOWN_TIME_SECS {
                 self.survivor_secs = Some(s);
             }
         }
         if self.killer_secs.is_none() && self.killer != "—" {
             let k = parse_time_to_seconds(&self.killer);
-            if k < 999999 {
+            if k < UNKNOWN_TIME_SECS {
                 self.killer_secs = Some(k);
             }
         }
@@ -166,7 +168,7 @@ impl RegionQueueData {
 pub fn parse_time_to_seconds(time_str: &str) -> u32 {
     let s = time_str.trim();
     if s.is_empty() || s == "—" {
-        return 999999;
+        return UNKNOWN_TIME_SECS;
     }
 
     if let Some(pos) = s.find(['h', 'H']) {
@@ -182,7 +184,7 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
             && let (Ok(m), Ok(sec)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
         {
             let total = m.saturating_mul(60).saturating_add(sec);
-            return if total > 0 { total } else { 999999 };
+            return if total > 0 { total } else { UNKNOWN_TIME_SECS };
         } else if parts.len() == 3
             && let (Ok(h), Ok(m), Ok(sec)) = (
                 parts[0].parse::<u32>(),
@@ -194,7 +196,7 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
                 .saturating_mul(3600)
                 .saturating_add(m.saturating_mul(60))
                 .saturating_add(sec);
-            return if total > 0 { total } else { 999999 };
+            return if total > 0 { total } else { UNKNOWN_TIME_SECS };
         }
     }
 
@@ -222,7 +224,7 @@ pub fn parse_time_to_seconds(time_str: &str) -> u32 {
         total = total.saturating_add(current_num);
     }
 
-    if total > 0 { total } else { 999999 }
+    if total > 0 { total } else { UNKNOWN_TIME_SECS }
 }
 
 #[derive(Deserialize, Debug)]
@@ -308,22 +310,28 @@ pub fn format_seconds_to_time(seconds_str: &str, format: TimeFormat) -> String {
     }
 }
 
-pub fn get_api_url() -> String {
+pub const DEFAULT_QUEUE_API_URL: &str = "https://api2.deadbyqueue.com/queues";
+
+pub fn resolve_api_url(config_api_url: Option<&str>) -> String {
     if let Ok(env_url) = std::env::var("DBD_API_URL") {
         let trimmed = env_url.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
-    let config_path = crate::config::get_config_path();
-    let config = crate::config::load_config(&config_path);
-    if let Some(cfg_url) = config.api_url {
+    if let Some(cfg_url) = config_api_url {
         let trimmed = cfg_url.trim();
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
     }
-    "https://api2.deadbyqueue.com/queues".to_string()
+    DEFAULT_QUEUE_API_URL.to_string()
+}
+
+pub fn get_api_url() -> String {
+    let config_path = crate::config::get_config_path();
+    let config = crate::config::load_config(&config_path);
+    resolve_api_url(config.api_url.as_deref())
 }
 
 pub fn parse_queue_response(body: &str, status: u16) -> Result<Api2Response, String> {
@@ -360,13 +368,17 @@ pub fn parse_queue_response(body: &str, status: u16) -> Result<Api2Response, Str
 
 pub fn fetch_queue_times() -> Result<(Vec<RegionQueueData>, i64), String> {
     let url = get_api_url();
+    fetch_queue_times_from(&url)
+}
+
+pub fn fetch_queue_times_from(url: &str) -> Result<(Vec<RegionQueueData>, i64), String> {
     let agent = ureq::builder()
         .timeout(std::time::Duration::from_secs(10))
         .try_proxy_from_env(true)
         .build();
 
     let resp = agent
-        .get(&url)
+        .get(url)
         .set("User-Agent", "curl/8.7.1")
         .set("Accept", "application/json, text/plain, */*")
         .call()
@@ -504,26 +516,29 @@ pub fn format_local_datetime(dt: chrono::DateTime<chrono::Local>) -> String {
     dt.format("%b %d, %H:%M").to_string()
 }
 
+static NORMALIZED_REGION_MAP: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    let mut m = HashMap::new();
+    m.insert("sao paulo", "São Paulo");
+    m.insert("sao_paulo", "São Paulo");
+    m.insert("sao-paulo", "São Paulo");
+    m.insert("saopaulo", "São Paulo");
+    m.insert("hong kong", "Hong Kong");
+    m.insert("hong_kong", "Hong Kong");
+    m.insert("hong-kong", "Hong Kong");
+    m.insert("hongkong", "Hong Kong");
+    m.insert("montreal", "Montréal");
+    m
+});
+
 pub fn resolve_region_names(words_list: &[String]) -> Result<Vec<String>, Vec<String>> {
     let raw_str = words_list.join(" ");
-    let mut parts = Vec::new();
-    for p in raw_str.split(',') {
-        let p_clean = p.trim();
-        if !p_clean.is_empty() {
-            parts.push(p_clean.to_string());
-        }
-    }
+    let parts: Vec<&str> = raw_str
+        .split(',')
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+        .collect();
 
-    let mut normalized_map = HashMap::new();
-    normalized_map.insert("sao paulo", "São Paulo");
-    normalized_map.insert("sao_paulo", "São Paulo");
-    normalized_map.insert("sao-paulo", "São Paulo");
-    normalized_map.insert("saopaulo", "São Paulo");
-    normalized_map.insert("hong kong", "Hong Kong");
-    normalized_map.insert("hong_kong", "Hong Kong");
-    normalized_map.insert("hong-kong", "Hong Kong");
-    normalized_map.insert("hongkong", "Hong Kong");
-    normalized_map.insert("montreal", "Montréal");
+    let normalized_map = &*NORMALIZED_REGION_MAP;
 
     let api_to_aws = get_api_to_aws();
     let aws_to_api = get_aws_to_api();
@@ -667,8 +682,8 @@ mod tests {
         assert_eq!(parse_time_to_seconds("3m27s"), 207);
 
         // Disabled / empty
-        assert_eq!(parse_time_to_seconds("—"), 999999);
-        assert_eq!(parse_time_to_seconds(""), 999999);
+        assert_eq!(parse_time_to_seconds("—"), UNKNOWN_TIME_SECS);
+        assert_eq!(parse_time_to_seconds(""), UNKNOWN_TIME_SECS);
     }
 
     #[test]

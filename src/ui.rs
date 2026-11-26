@@ -8,7 +8,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{
         Block, BorderType, Borders, Cell, Clear, List, ListItem, ListState, Padding, Paragraph,
-        Row, Table,
+        Row, Scrollbar, ScrollbarOrientation, ScrollbarState, Table, Wrap,
     },
 };
 
@@ -16,13 +16,10 @@ pub const MIN_WIDTH: u16 = 48;
 pub const MIN_HEIGHT: u16 = 12;
 
 pub const STANDARD_WIDTH_BREAKPOINT: u16 = 80;
-#[allow(dead_code)]
-pub const NARROW_WIDTH_BREAKPOINT: u16 = 60;
 
 pub const HEADER_HEIGHT: u16 = 1;
 pub const FOOTER_HEIGHT: u16 = 1;
 pub const EMPTY_TABLE_HEIGHT: u16 = 4;
-pub const MODAL_WIDTH_PERCENT: u16 = 65;
 pub const MODAL_HEIGHT_PERCENT: u16 = 80;
 pub const TABLE_WIDTH: u16 = 69;
 pub const NARROW_TABLE_WIDTH: u16 = 44;
@@ -139,31 +136,48 @@ impl Theme {
             .fg(self.accent)
             .add_modifier(Modifier::BOLD)
     }
+
+    pub fn lock_badge_style(&self) -> Style {
+        if self.no_color {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default()
+                .fg(self.success)
+                .add_modifier(Modifier::BOLD)
+        }
+    }
 }
 
-#[allow(dead_code)]
-pub fn color_for_time(time_str: &str) -> Color {
-    Theme::new().color_for_queue_time(time_str)
+pub fn centered_rect_sized(width: u16, height: u16, r: Rect) -> Rect {
+    let w = width.min(r.width);
+    let h = height.min(r.height);
+    let x = r.x + r.width.saturating_sub(w) / 2;
+    let y = r.y + r.height.saturating_sub(h) / 2;
+    Rect::new(x, y, w, h)
 }
 
-pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
+pub fn modal_rect(area: Rect) -> Rect {
+    let modal_w = ((area.width as u32 * 78) / 100)
+        .max(60)
+        .min(area.width.saturating_sub(2) as u32)
+        .min(76) as u16;
+    let modal_h = ((area.height as u32 * MODAL_HEIGHT_PERCENT as u32) / 100)
+        .max(10)
+        .min(area.height.saturating_sub(2) as u32) as u16;
+    centered_rect_sized(modal_w, modal_h, area)
+}
 
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+fn truncate_ellipsis(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        return s.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".repeat(max_chars);
+    }
+    let mut out: String = s.chars().take(max_chars - 1).collect();
+    out.push('…');
+    out
 }
 
 fn pad_right(s: &str, width: usize) -> String {
@@ -171,40 +185,67 @@ fn pad_right(s: &str, width: usize) -> String {
     format!("{}{}", s, " ".repeat(pad))
 }
 
-pub fn draw_floor_warning(f: &mut Frame, theme: &Theme, area: Rect) {
-    let msg = vec![
-        Line::from(Span::styled("Terminal too small", theme.accent_style())),
-        Line::from(Span::styled(
-            format!("Current size: {}x{}", area.width, area.height),
-            theme.subtle_style(),
-        )),
-        Line::from(Span::styled(
-            format!("Minimum required: {}x{}", MIN_WIDTH, MIN_HEIGHT),
-            theme.primary_style(),
-        )),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Please resize your window or press 'q' to quit",
-            theme.subtle_style(),
-        )),
-    ];
+pub fn draw_floor_warning(f: &mut Frame, locale: crate::i18n::Locale, theme: &Theme, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
         .border_style(theme.subtle_style());
-    let paragraph = Paragraph::new(msg)
-        .block(block)
-        .alignment(Alignment::Center);
-    f.render_widget(paragraph, area);
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let msg = vec![
+        Line::from(Span::styled(
+            tr(locale, TextKey::FloorTitle),
+            theme.accent_style(),
+        )),
+        Line::from(Span::styled(
+            format!("{}x{}", area.width, area.height),
+            theme.subtle_style(),
+        )),
+        Line::from(Span::styled(
+            format!(
+                "{}{}x{}",
+                tr(locale, TextKey::FloorRequiredPrefix),
+                MIN_WIDTH,
+                MIN_HEIGHT
+            ),
+            theme.primary_style(),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            tr(locale, TextKey::FloorHint),
+            theme.subtle_style(),
+        )),
+    ];
+
+    let target = if inner.height >= 7 {
+        Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Fill(1),
+                Constraint::Length(5),
+                Constraint::Fill(1),
+            ])
+            .split(inner)[1]
+    } else {
+        inner
+    };
+
+    let paragraph = Paragraph::new(msg).alignment(Alignment::Center);
+    f.render_widget(paragraph, target);
 }
 
 pub fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let active_sort_str = tr_sort(app.locale, app.sort);
     let mode_str = tr_mode(app.locale, app.mode);
     let lock_str = if app.locked.is_empty() {
-        tr(app.locale, TextKey::LockNone)
+        tr(app.locale, TextKey::LockNone).to_string()
     } else {
-        tr(app.locale, TextKey::LockActive)
+        format!(
+            "{} ({})",
+            tr(app.locale, TextKey::LockActive),
+            app.locked.len()
+        )
     };
 
     let sort_indicator = match app.sort {
@@ -214,18 +255,7 @@ pub fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         crate::config::SortOrder::Default => "",
     };
 
-    let mut spans = vec![
-        Span::styled(tr(app.locale, TextKey::SortLabel), theme.subtle_style()),
-        Span::styled(
-            format!("{}{}", active_sort_str, sort_indicator),
-            theme.primary_style(),
-        ),
-        Span::styled("  │  ", theme.subtle_style()),
-        Span::styled(tr(app.locale, TextKey::ModeLabel), theme.subtle_style()),
-        Span::styled(mode_str, theme.primary_style()),
-    ];
-
-    if app.mode == crate::config::GameMode::Event {
+    let event_span = if app.mode == crate::config::GameMode::Event {
         let now_ts = chrono::Local::now().timestamp();
         if let Some(ref ev) = app.current_event
             && let Ok(end_ts) = ev.end.trim().parse::<i64>()
@@ -234,7 +264,7 @@ pub fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             let countdown = crate::api::format_event_countdown(remaining, app.time_format);
             let left_str = tr(app.locale, TextKey::EventLeft);
             let text = format!(" [{} - {} {}]", ev.name, countdown, left_str);
-            spans.push(Span::styled(text, Style::default().fg(theme.info)));
+            Some(Span::styled(text, Style::default().fg(theme.info)))
         } else if let Some(ref ev) = app.upcoming_event
             && let Some(dt) = crate::api::event_timestamp_to_local(&ev.start)
         {
@@ -245,200 +275,174 @@ pub fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 " [{}: {} - {} {}]",
                 upcoming_str, ev.name, starts_str, dt_str
             );
-            spans.push(Span::styled(text, theme.subtle_style()));
+            Some(Span::styled(text, theme.subtle_style()))
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
-    spans.extend([
-        Span::styled("  │  ", theme.subtle_style()),
-        Span::styled(tr(app.locale, TextKey::TimeLabel), theme.subtle_style()),
-        Span::styled(
+    let lock_val_style = if !app.locked.is_empty() {
+        Style::default()
+            .fg(theme.success)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        theme.subtle_style()
+    };
+
+    let build_spans = |sep: &'static str,
+                       compact_labels: bool,
+                       short_sort: bool,
+                       include_event: bool|
+     -> Vec<Span<'_>> {
+        let sort_lbl = if short_sort && app.locale == crate::i18n::Locale::Ru {
+            "Сорт: "
+        } else {
+            tr(app.locale, TextKey::SortLabel)
+        };
+        let mut s = vec![
+            Span::styled(sort_lbl, theme.subtle_style()),
+            Span::styled(
+                format!("{}{}", active_sort_str, sort_indicator),
+                theme.primary_style(),
+            ),
+            Span::styled(sep, theme.subtle_style()),
+        ];
+        if !compact_labels {
+            s.push(Span::styled(
+                tr(app.locale, TextKey::ModeLabel),
+                theme.subtle_style(),
+            ));
+        }
+        s.push(Span::styled(mode_str, theme.primary_style()));
+        if include_event && let Some(ref ev_span) = event_span {
+            s.push(ev_span.clone());
+        }
+        s.push(Span::styled(sep, theme.subtle_style()));
+        if !compact_labels {
+            s.push(Span::styled(
+                tr(app.locale, TextKey::TimeLabel),
+                theme.subtle_style(),
+            ));
+        }
+        s.push(Span::styled(
             tr_time_format(app.locale, app.time_format),
             theme.primary_style(),
-        ),
-        Span::styled("  │  ", theme.subtle_style()),
-        Span::styled(tr(app.locale, TextKey::LockLabel), theme.subtle_style()),
-        Span::styled(
-            lock_str,
-            if !app.locked.is_empty() {
-                Style::default()
-                    .fg(theme.success)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                theme.subtle_style()
-            },
-        ),
-    ]);
+        ));
+        s.push(Span::styled(sep, theme.subtle_style()));
+        if !compact_labels {
+            s.push(Span::styled(
+                tr(app.locale, TextKey::LockLabel),
+                theme.subtle_style(),
+            ));
+        }
+        s.push(Span::styled(lock_str.clone(), lock_val_style));
+        s
+    };
 
-    let header = Paragraph::new(Line::from(spans));
+    let max_w = area.width as usize;
+    let mut line = Line::from(build_spans("  │  ", false, false, true));
+    for (sep, compact, short_sort, show_ev) in [
+        (" │ ", false, false, true),
+        (" │ ", true, false, true),
+        (" │ ", true, true, true),
+        (" │ ", true, true, false),
+    ] {
+        if line.width() <= max_w {
+            break;
+        }
+        line = Line::from(build_spans(sep, compact, short_sort, show_ev));
+    }
+
+    let header = Paragraph::new(line);
     f.render_widget(header, area);
+}
+
+fn draw_table_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    if area.height <= 2 {
+        return;
+    }
+
+    let (msg, color) = if app.is_fetching {
+        let spinner = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
+        (
+            format!("{} {}", spinner, tr(app.locale, TextKey::FetchingQueues)),
+            theme.accent,
+        )
+    } else if app
+        .notice
+        .as_ref()
+        .is_some_and(|n| n.kind == NoticeKind::Error)
+    {
+        (
+            tr(app.locale, TextKey::FailedQueues).to_string(),
+            theme.error,
+        )
+    } else if app.mode == crate::config::GameMode::Event
+        && let Some(ref ev) = app.upcoming_event
+        && let Some(dt) = crate::api::event_timestamp_to_local(&ev.start)
+    {
+        let dt_str = crate::api::format_local_datetime(dt);
+        let now_ts = chrono::Local::now().timestamp();
+        let start_ts = ev.start.trim().parse::<i64>().unwrap_or(0);
+        let remaining = (start_ts - now_ts).max(0) as u64;
+        let countdown = crate::api::format_event_countdown(remaining, app.time_format);
+        (
+            format!(
+                "{}: {} ({} {} - {} {})",
+                tr(app.locale, TextKey::EventUpcoming),
+                ev.name,
+                tr(app.locale, TextKey::EventStartsIn),
+                dt_str,
+                tr(app.locale, TextKey::EventIn),
+                countdown
+            ),
+            theme.info,
+        )
+    } else {
+        (
+            tr(app.locale, TextKey::NoDataForMode).to_string(),
+            theme.subtle_text,
+        )
+    };
+
+    let msg_area = Rect {
+        x: area.x,
+        y: area.y + 2,
+        width: area.width,
+        height: area.height.saturating_sub(2),
+    };
+    let empty_msg =
+        Paragraph::new(Span::styled(msg, Style::default().fg(color))).wrap(Wrap { trim: false });
+    f.render_widget(empty_msg, msg_area);
 }
 
 pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_narrow: bool) {
     let rows_data = app.get_filtered_sorted_rows();
     let is_empty = rows_data.is_empty();
+    let rows_len = rows_data.len();
 
-    let api_to_aws = api::get_api_to_aws();
-    let (rows, col_constraints, spacing) = if is_empty {
-        let (msg, color) = if app.is_fetching {
-            (
-                tr(app.locale, TextKey::FetchingQueues).to_string(),
-                theme.accent,
-            )
-        } else if app
-            .notice
-            .as_ref()
-            .is_some_and(|n| n.kind == NoticeKind::Error)
-        {
-            (
-                tr(app.locale, TextKey::FailedQueues).to_string(),
-                theme.error,
-            )
-        } else if app.mode == crate::config::GameMode::Event {
-            if let Some(ref ev) = app.upcoming_event {
-                if let Some(dt) = crate::api::event_timestamp_to_local(&ev.start) {
-                    let dt_str = crate::api::format_local_datetime(dt);
-                    let now_ts = chrono::Local::now().timestamp();
-                    let start_ts = ev.start.trim().parse::<i64>().unwrap_or(0);
-                    let remaining = (start_ts - now_ts).max(0) as u64;
-                    let countdown = crate::api::format_event_countdown(remaining, app.time_format);
-                    let upcoming_str = tr(app.locale, TextKey::EventUpcoming);
-                    let starts_str = tr(app.locale, TextKey::EventStartsIn);
-                    let in_str = tr(app.locale, TextKey::EventIn);
-                    (
-                        format!(
-                            "  {}: {} ({} {} - {} {})",
-                            upcoming_str, ev.name, starts_str, dt_str, in_str, countdown
-                        ),
-                        theme.info,
-                    )
-                } else {
-                    (
-                        format!("  {}", tr(app.locale, TextKey::NoDataForMode)),
-                        theme.subtle_text,
-                    )
-                }
-            } else {
-                (
-                    format!("  {}", tr(app.locale, TextKey::NoDataForMode)),
-                    theme.subtle_text,
-                )
-            }
-        } else {
-            (
-                tr(app.locale, TextKey::NoDataForMode).to_string(),
-                theme.subtle_text,
-            )
-        };
+    let (col_constraints, spacing) = if is_narrow {
         (
-            vec![Row::new(vec![
-                Cell::from(Span::styled(msg, Style::default().fg(color))),
-                Cell::from(""),
-                Cell::from(""),
-                Cell::from(""),
-            ])],
             vec![
-                Constraint::Percentage(100),
-                Constraint::Length(0),
-                Constraint::Length(0),
-                Constraint::Length(0),
+                Constraint::Length(15),
+                Constraint::Length(7),
+                Constraint::Length(9),
+                Constraint::Length(10),
             ],
             1,
         )
     } else {
-        let r: Vec<Row> = rows_data
-            .into_iter()
-            .map(|item| {
-                let aws_code = api_to_aws.get(item.name.as_str()).unwrap_or(&"");
-                let is_whitelisted = app.locked.contains(*aws_code);
-                let is_disabled = item.is_disabled();
-
-                let reg_str = if is_narrow || item.flag.is_empty() {
-                    item.name.clone()
-                } else {
-                    format!("{} {}", item.flag, item.name)
-                };
-
-                if is_disabled {
-                    let dim_style = theme.subtle_style();
-                    Row::new(vec![
-                        Cell::from(Span::styled(reg_str, dim_style)),
-                        Cell::from(
-                            Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
-                        ),
-                        Cell::from(
-                            Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
-                        ),
-                        Cell::from(
-                            Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
-                        ),
-                    ])
-                } else {
-                    let name_style = if is_whitelisted {
-                        theme.accent_style()
-                    } else {
-                        Style::default()
-                    };
-
-                    let (ping_str, ping_color) = if let Some(&ms) = app.pings.get(*aws_code) {
-                        (format!("{} ms", ms), theme.color_for_ping(Some(ms)))
-                    } else if app.pings.is_empty() {
-                        ("...".to_string(), theme.subtle_text)
-                    } else {
-                        ("—".to_string(), theme.subtle_text)
-                    };
-
-                    let surv_color = theme.color_for_queue_time(&item.survivor);
-                    let kill_color = theme.color_for_queue_time(&item.killer);
-
-                    Row::new(vec![
-                        Cell::from(Span::styled(reg_str, name_style)),
-                        Cell::from(
-                            Line::from(Span::styled(ping_str, Style::default().fg(ping_color)))
-                                .alignment(Alignment::Right),
-                        ),
-                        Cell::from(
-                            Line::from(Span::styled(
-                                item.survivor.clone(),
-                                Style::default().fg(surv_color),
-                            ))
-                            .alignment(Alignment::Right),
-                        ),
-                        Cell::from(
-                            Line::from(Span::styled(
-                                item.killer.clone(),
-                                Style::default().fg(kill_color),
-                            ))
-                            .alignment(Alignment::Right),
-                        ),
-                    ])
-                }
-            })
-            .collect();
-
-        let (constraints, spacing) = if is_narrow {
-            (
-                vec![
-                    Constraint::Length(15),
-                    Constraint::Length(7),
-                    Constraint::Length(9),
-                    Constraint::Length(10),
-                ],
-                1,
-            )
-        } else {
-            (
-                vec![
-                    Constraint::Length(24),
-                    Constraint::Length(11),
-                    Constraint::Length(14),
-                    Constraint::Length(14),
-                ],
-                2,
-            )
-        };
-
-        (r, constraints, spacing)
+        (
+            vec![
+                Constraint::Length(24),
+                Constraint::Length(11),
+                Constraint::Length(14),
+                Constraint::Length(14),
+            ],
+            2,
+        )
     };
 
     let ping_indicator = if app.sort == crate::config::SortOrder::Ping {
@@ -473,17 +477,30 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
         )
     };
 
+    let hdr_ping_style = if app.sort == crate::config::SortOrder::Ping {
+        theme.accent_style()
+    } else {
+        theme.primary_style()
+    };
+    let hdr_surv_style = if app.sort == crate::config::SortOrder::Survivor {
+        theme.accent_style()
+    } else {
+        theme.primary_style()
+    };
+    let hdr_kill_style = if app.sort == crate::config::SortOrder::Killer {
+        theme.accent_style()
+    } else {
+        theme.primary_style()
+    };
+
     let header_row = Row::new(vec![
         Cell::from(Span::styled(hdr_region, theme.primary_style())),
+        Cell::from(Line::from(Span::styled(hdr_ping, hdr_ping_style)).alignment(Alignment::Right)),
         Cell::from(
-            Line::from(Span::styled(hdr_ping, theme.primary_style())).alignment(Alignment::Right),
+            Line::from(Span::styled(hdr_survivor, hdr_surv_style)).alignment(Alignment::Right),
         ),
         Cell::from(
-            Line::from(Span::styled(hdr_survivor, theme.primary_style()))
-                .alignment(Alignment::Right),
-        ),
-        Cell::from(
-            Line::from(Span::styled(hdr_killer, theme.primary_style())).alignment(Alignment::Right),
+            Line::from(Span::styled(hdr_killer, hdr_kill_style)).alignment(Alignment::Right),
         ),
     ])
     .bottom_margin(1);
@@ -500,15 +517,121 @@ pub fn draw_table(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect, is_na
         height: area.height,
     };
 
-    let mut table = Table::new(rows, col_constraints)
-        .header(header_row)
-        .column_spacing(spacing);
-
-    if !is_empty {
-        table = table.row_highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    if is_empty {
+        let empty_table = Table::new(Vec::<Row>::new(), col_constraints)
+            .header(header_row)
+            .column_spacing(spacing);
+        f.render_widget(empty_table, table_area);
+        draw_table_empty(f, app, theme, area);
+        return;
     }
 
+    let api_to_aws = api::get_api_to_aws();
+    let lock_badge_style = theme.lock_badge_style();
+
+    let rows: Vec<Row> = rows_data
+        .into_iter()
+        .map(|item| {
+            let aws_code = api_to_aws.get(item.name.as_str()).unwrap_or(&"");
+            let is_whitelisted = app.locked.contains(*aws_code);
+            let is_disabled = item.is_disabled();
+
+            let reg_str = if is_narrow || item.flag.is_empty() {
+                item.name.clone()
+            } else {
+                format!("{} {}", item.flag, item.name)
+            };
+
+            if is_disabled {
+                let dim_style = theme.subtle_style();
+                Row::new(vec![
+                    Cell::from(Span::styled(reg_str, dim_style)),
+                    Cell::from(
+                        Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
+                    ),
+                    Cell::from(
+                        Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
+                    ),
+                    Cell::from(
+                        Line::from(Span::styled("—", dim_style)).alignment(Alignment::Right),
+                    ),
+                ])
+            } else {
+                let name_cell = if is_whitelisted {
+                    Cell::from(Line::from(vec![
+                        Span::styled(reg_str, theme.primary_style()),
+                        Span::styled(" ●", lock_badge_style),
+                    ]))
+                } else {
+                    Cell::from(Span::styled(reg_str, Style::default()))
+                };
+
+                let (ping_str, ping_color) = if let Some(&ms) = app.pings.get(*aws_code) {
+                    (format!("{} ms", ms), theme.color_for_ping(Some(ms)))
+                } else if app.pings.is_empty() {
+                    ("...".to_string(), theme.subtle_text)
+                } else {
+                    ("—".to_string(), theme.subtle_text)
+                };
+
+                let surv_color = theme.color_for_queue_time(&item.survivor);
+                let kill_color = theme.color_for_queue_time(&item.killer);
+
+                Row::new(vec![
+                    name_cell,
+                    Cell::from(
+                        Line::from(Span::styled(ping_str, Style::default().fg(ping_color)))
+                            .alignment(Alignment::Right),
+                    ),
+                    Cell::from(
+                        Line::from(Span::styled(
+                            item.survivor.clone(),
+                            Style::default().fg(surv_color),
+                        ))
+                        .alignment(Alignment::Right),
+                    ),
+                    Cell::from(
+                        Line::from(Span::styled(
+                            item.killer.clone(),
+                            Style::default().fg(kill_color),
+                        ))
+                        .alignment(Alignment::Right),
+                    ),
+                ])
+            }
+        })
+        .collect();
+
+    let table = Table::new(rows, col_constraints)
+        .header(header_row)
+        .column_spacing(spacing)
+        .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD));
+
     f.render_stateful_widget(table, table_area, &mut app.table_state);
+
+    let visible_rows = table_area.height.saturating_sub(2) as usize;
+    if rows_len > visible_rows && area.height > 2 && area.width > table_area.width {
+        let sb_x = if area.width > table_area.width + 1 {
+            table_area.right() + 1
+        } else {
+            table_area.right()
+        };
+        let sb_area = Rect {
+            x: sb_x,
+            y: table_area.y + 2,
+            width: 1,
+            height: table_area.height.saturating_sub(2),
+        };
+        let mut sb_state =
+            ScrollbarState::new(rows_len).position(app.table_state.selected().unwrap_or(0));
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .style(theme.subtle_style());
+        f.render_stateful_widget(scrollbar, sb_area, &mut sb_state);
+    }
 }
 
 pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narrow: bool) {
@@ -520,27 +643,6 @@ pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narro
         format_time_diff(app.locale, diff)
     };
 
-    let status_span = if let Some(ref notice) = app.notice {
-        let (prefix, color) = match notice.kind {
-            NoticeKind::Error => ("✗ ", theme.error),
-            NoticeKind::Info => ("ℹ ", theme.accent),
-            NoticeKind::Success => ("✓ ", theme.success),
-        };
-        Span::styled(
-            format!("{}{}", prefix, notice.message),
-            Style::default().fg(color).add_modifier(Modifier::BOLD),
-        )
-    } else if app.is_fetching {
-        let spinner = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
-        let msg = tr(app.locale, TextKey::StatusFetching);
-        Span::styled(format!("{} {}", spinner, msg), theme.accent_style())
-    } else {
-        let prefix = tr(app.locale, TextKey::StatusApiUpdated);
-        Span::styled(format!("{}{}", prefix, time_str), theme.subtle_style())
-    };
-
-    let mut spans = vec![status_span, Span::styled("  │  ", theme.subtle_style())];
-
     let select_txt = tr(app.locale, TextKey::ActionSelect).trim();
     let lock_txt = tr(app.locale, TextKey::ActionLock).trim();
     let sort_txt = tr(app.locale, TextKey::ActionSort).trim();
@@ -549,17 +651,38 @@ pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narro
     let refresh_txt = tr(app.locale, TextKey::ActionRefresh).trim();
     let quit_txt = tr(app.locale, TextKey::ActionQuit).trim();
 
-    if area.width < 50 {
-        spans.extend([
-            Span::styled("↑↓", theme.accent_style()),
-            Span::styled(" nav ", theme.subtle_style()),
-            Span::styled("L", theme.accent_style()),
-            Span::styled(" lock ", theme.subtle_style()),
-            Span::styled("q", theme.accent_style()),
-            Span::styled(" quit", theme.subtle_style()),
-        ]);
-    } else if is_narrow {
-        spans.extend([
+    let full_hints = vec![
+        Span::styled("↑↓/jk ", theme.accent_style()),
+        Span::styled(format!("{} · ", select_txt), theme.subtle_style()),
+        Span::styled("L ", theme.accent_style()),
+        Span::styled(format!("{} · ", lock_txt), theme.subtle_style()),
+        Span::styled("S ", theme.accent_style()),
+        Span::styled(format!("{} · ", sort_txt), theme.subtle_style()),
+        Span::styled("M ", theme.accent_style()),
+        Span::styled(format!("{} · ", mode_txt), theme.subtle_style()),
+        Span::styled("T ", theme.accent_style()),
+        Span::styled(format!("{} · ", time_txt), theme.subtle_style()),
+        Span::styled("R ", theme.accent_style()),
+        Span::styled(format!("{} · ", refresh_txt), theme.subtle_style()),
+        Span::styled("Esc/q ", theme.accent_style()),
+        Span::styled(quit_txt, theme.subtle_style()),
+    ];
+    let medium_hints = vec![
+        Span::styled("↑↓ ", theme.accent_style()),
+        Span::styled(format!("{} · ", select_txt), theme.subtle_style()),
+        Span::styled("L ", theme.accent_style()),
+        Span::styled(format!("{} · ", lock_txt), theme.subtle_style()),
+        Span::styled("S ", theme.accent_style()),
+        Span::styled(format!("{} · ", sort_txt), theme.subtle_style()),
+        Span::styled("M ", theme.accent_style()),
+        Span::styled(format!("{} · ", mode_txt), theme.subtle_style()),
+        Span::styled("T ", theme.accent_style()),
+        Span::styled(format!("{} · ", time_txt), theme.subtle_style()),
+        Span::styled("q ", theme.accent_style()),
+        Span::styled(quit_txt, theme.subtle_style()),
+    ];
+    let compact_hints = if app.locale == crate::i18n::Locale::En {
+        vec![
             Span::styled("↑↓", theme.accent_style()),
             Span::styled(" nav  ", theme.subtle_style()),
             Span::styled("L", theme.accent_style()),
@@ -570,110 +693,244 @@ pub fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect, is_narro
             Span::styled(" mode  ", theme.subtle_style()),
             Span::styled("q", theme.accent_style()),
             Span::styled(" quit", theme.subtle_style()),
-        ]);
-    } else if area.width < 96 {
-        spans.extend([
-            Span::styled("↑↓ ", theme.accent_style()),
-            Span::styled(format!("{} · ", select_txt), theme.subtle_style()),
-            Span::styled("L ", theme.accent_style()),
-            Span::styled(format!("{} · ", lock_txt), theme.subtle_style()),
-            Span::styled("S ", theme.accent_style()),
-            Span::styled(format!("{} · ", sort_txt), theme.subtle_style()),
-            Span::styled("M ", theme.accent_style()),
-            Span::styled(format!("{} · ", mode_txt), theme.subtle_style()),
-            Span::styled("T ", theme.accent_style()),
-            Span::styled(format!("{} · ", time_txt), theme.subtle_style()),
-            Span::styled("q ", theme.accent_style()),
-            Span::styled(quit_txt, theme.subtle_style()),
-        ]);
+        ]
     } else {
-        spans.extend([
-            Span::styled("↑↓/jk ", theme.accent_style()),
-            Span::styled(format!("{} · ", select_txt), theme.subtle_style()),
-            Span::styled("L ", theme.accent_style()),
-            Span::styled(format!("{} · ", lock_txt), theme.subtle_style()),
-            Span::styled("S ", theme.accent_style()),
-            Span::styled(format!("{} · ", sort_txt), theme.subtle_style()),
-            Span::styled("M ", theme.accent_style()),
-            Span::styled(format!("{} · ", mode_txt), theme.subtle_style()),
-            Span::styled("T ", theme.accent_style()),
-            Span::styled(format!("{} · ", time_txt), theme.subtle_style()),
-            Span::styled("R ", theme.accent_style()),
-            Span::styled(format!("{} · ", refresh_txt), theme.subtle_style()),
-            Span::styled("Esc/q ", theme.accent_style()),
-            Span::styled(quit_txt, theme.subtle_style()),
-        ]);
-    }
+        vec![
+            Span::styled("↑↓", theme.accent_style()),
+            Span::styled(format!(" {}  ", select_txt), theme.subtle_style()),
+            Span::styled("L", theme.accent_style()),
+            Span::styled(format!(" {}  ", lock_txt), theme.subtle_style()),
+            Span::styled("S", theme.accent_style()),
+            Span::styled(format!(" {}  ", sort_txt), theme.subtle_style()),
+            Span::styled("q", theme.accent_style()),
+            Span::styled(format!(" {}", quit_txt), theme.subtle_style()),
+        ]
+    };
+    let minimal_hints = if app.locale == crate::i18n::Locale::En {
+        vec![
+            Span::styled("↑↓", theme.accent_style()),
+            Span::styled(" nav ", theme.subtle_style()),
+            Span::styled("L", theme.accent_style()),
+            Span::styled(" lock ", theme.subtle_style()),
+            Span::styled("q", theme.accent_style()),
+            Span::styled(" quit", theme.subtle_style()),
+        ]
+    } else {
+        vec![
+            Span::styled("↑↓", theme.accent_style()),
+            Span::styled(format!(" {} ", select_txt), theme.subtle_style()),
+            Span::styled("L", theme.accent_style()),
+            Span::styled(format!(" {} ", lock_txt), theme.subtle_style()),
+            Span::styled("q", theme.accent_style()),
+            Span::styled(format!(" {}", quit_txt), theme.subtle_style()),
+        ]
+    };
+
+    let sep_str = if area.width < 56 { " │ " } else { "  │  " };
+    let sep_len = sep_str.chars().count();
+    let max_w = area.width as usize;
+    let min_status_reserve = 14;
+
+    let candidates: Vec<Vec<Span<'_>>> = if area.width < 50 {
+        vec![minimal_hints]
+    } else if is_narrow {
+        vec![compact_hints, minimal_hints]
+    } else {
+        vec![full_hints, medium_hints, compact_hints, minimal_hints]
+    };
+
+    let mut hint_spans = candidates
+        .iter()
+        .find(|tier| {
+            let w: usize = tier.iter().map(Span::width).sum();
+            w + sep_len + min_status_reserve <= max_w
+        })
+        .cloned()
+        .unwrap_or_else(|| candidates.into_iter().last().unwrap_or_default());
+
+    let hints_width: usize = hint_spans.iter().map(Span::width).sum();
+    let status_budget = max_w.saturating_sub(hints_width + sep_len);
+
+    let status_span = if let Some(ref notice) = app.notice {
+        let (prefix, color) = match notice.kind {
+            NoticeKind::Error => ("✗ ", theme.error),
+            NoticeKind::Info => ("ℹ ", theme.accent),
+            NoticeKind::Success => ("✓ ", theme.success),
+        };
+        let msg = truncate_ellipsis(&notice.message, status_budget.saturating_sub(2));
+        Span::styled(
+            format!("{}{}", prefix, msg),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        )
+    } else if app.is_fetching {
+        let spinner = SPINNER_FRAMES[app.spinner_frame % SPINNER_FRAMES.len()];
+        let full = format!("{} {}", spinner, tr(app.locale, TextKey::StatusFetching));
+        Span::styled(
+            truncate_ellipsis(&full, status_budget),
+            theme.accent_style(),
+        )
+    } else {
+        let full = format!("{}{}", tr(app.locale, TextKey::StatusApiUpdated), time_str);
+        Span::styled(
+            truncate_ellipsis(&full, status_budget),
+            theme.subtle_style(),
+        )
+    };
+
+    let mut spans = if status_budget > 0 {
+        vec![status_span, Span::styled(sep_str, theme.subtle_style())]
+    } else {
+        Vec::new()
+    };
+    spans.append(&mut hint_spans);
 
     let footer = Paragraph::new(Line::from(spans));
     f.render_widget(footer, area);
 }
 
+fn build_modal_item<'a>(
+    app: &App,
+    theme: &Theme,
+    code: &str,
+    is_cursor: bool,
+    list_width: u16,
+) -> ListItem<'a> {
+    let name = api::get_aws_to_api().get(code).copied().unwrap_or(code);
+    let flag = api::get_aws_to_flag().get(code).copied().unwrap_or("");
+    let display_name = if flag.is_empty() || list_width < 36 {
+        name.to_string()
+    } else {
+        format!("{} {}", flag, name)
+    };
+    let is_selected = app.lock_modal_selected.iter().any(|r| r == code);
+    let show_code = list_width >= 44;
+    let name_col_w = if list_width >= 50 { 19 } else { 15 };
+
+    let (checkbox, check_style) = if is_selected {
+        ("[*] ", theme.lock_badge_style())
+    } else {
+        ("[ ] ", theme.subtle_style())
+    };
+
+    let name_style = if is_selected {
+        if theme.no_color {
+            Style::default().add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(theme.success)
+        }
+    } else {
+        Style::default().fg(theme.text_primary)
+    };
+
+    let ping = app.pings.get(code).copied();
+    let (ping_str, ping_color) = if let Some(ms) = ping {
+        (format!("{:>4} ms", ms), theme.color_for_ping(Some(ms)))
+    } else {
+        ("      —".to_string(), theme.subtle_text)
+    };
+
+    let mut row_spans = vec![
+        Span::styled(checkbox, check_style),
+        Span::styled(pad_right(&display_name, name_col_w), name_style),
+    ];
+    if show_code {
+        row_spans.push(Span::styled(
+            pad_right(code, 16),
+            Style::default().fg(theme.text_secondary),
+        ));
+    }
+    row_spans.push(Span::styled(ping_str, Style::default().fg(ping_color)));
+
+    let item = ListItem::new(Line::from(row_spans));
+    if is_cursor {
+        item.style(Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD))
+    } else {
+        item
+    }
+}
+
 pub fn draw_lock_modal(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Clear, area);
 
-    let modal_title = tr(app.locale, TextKey::ModalTitle);
+    let modal_regions = app.get_modal_regions();
+    let visible_selected = modal_regions
+        .iter()
+        .filter(|r| app.lock_modal_selected.iter().any(|s| s == *r))
+        .count();
+    let modal_title = tr(app.locale, TextKey::ModalTitle).trim();
     let toggle_txt = tr(app.locale, TextKey::ModalToggle);
     let all_txt = tr(app.locale, TextKey::ModalAll);
     let invert_txt = tr(app.locale, TextKey::ModalInvert);
     let apply_txt = tr(app.locale, TextKey::ModalApply);
     let cancel_txt = tr(app.locale, TextKey::ModalCancel);
 
+    let title_str = format!(
+        " {} ({}/{}) ",
+        modal_title,
+        visible_selected,
+        modal_regions.len()
+    );
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(theme.accent_style())
-        .title(Span::styled(
-            format!(" {} ", modal_title),
-            theme.primary_style(),
-        ))
+        .title(Span::styled(title_str, theme.primary_style()))
         .padding(Padding::horizontal(1));
 
     let inner_area = block.inner(area);
     f.render_widget(block, area);
 
+    let part1 = vec![
+        Span::styled(" [Space] ", theme.accent_style()),
+        Span::styled(toggle_txt, Style::default().fg(Color::Reset)),
+        Span::styled("  [a] ", theme.accent_style()),
+        Span::styled(all_txt, Style::default().fg(Color::Reset)),
+        Span::styled("  [i] ", theme.accent_style()),
+        Span::styled(invert_txt, Style::default().fg(Color::Reset)),
+    ];
+    let part2 = vec![
+        Span::styled(" [Enter] ", theme.accent_style()),
+        Span::styled(apply_txt, Style::default().fg(Color::Reset)),
+        Span::styled("  [Esc] ", theme.accent_style()),
+        Span::styled(cancel_txt, Style::default().fg(Color::Reset)),
+    ];
+
+    let mut combined = part1.clone();
+    combined.push(Span::raw(" "));
+    combined.extend(part2.clone());
+    let single_line = Line::from(combined);
+
+    let max_w = inner_area.width.max(1) as usize;
+    let (footer_lines, footer_height) = if single_line.width() <= max_w {
+        (vec![single_line], 1u16)
+    } else {
+        let l1 = Line::from(part1);
+        let l2 = Line::from(part2);
+        let h = (l1.width().max(1).div_ceil(max_w) + l2.width().max(1).div_ceil(max_w)) as u16;
+        (
+            vec![l1, l2],
+            h.min(inner_area.height.saturating_sub(1)).max(1),
+        )
+    };
+
+    let footer_widget = Paragraph::new(footer_lines).wrap(Wrap { trim: false });
+
     let modal_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(0), Constraint::Length(1)])
+        .constraints([Constraint::Min(0), Constraint::Length(footer_height)])
         .split(inner_area);
-
-    let modal_regions = app.get_modal_regions();
-    let aws_to_api = api::get_aws_to_api();
-    let aws_to_flag = api::get_aws_to_flag();
 
     let items: Vec<ListItem> = modal_regions
         .iter()
         .enumerate()
         .map(|(idx, code)| {
-            let name = aws_to_api.get(*code).unwrap_or(code);
-            let flag = aws_to_flag.get(*code).unwrap_or(&"");
-            let flag_str = if flag.is_empty() {
-                String::new()
-            } else {
-                format!("{} ", flag)
-            };
-            let is_selected = app.lock_modal_selected.iter().any(|r| r == *code);
-
-            let checkbox = if is_selected { "[*] " } else { "[ ] " };
-
-            let ping_str = if let Some(&ms) = app.pings.get(*code) {
-                format!(" - {} ms", ms)
-            } else {
-                String::new()
-            };
-
-            let text = format!("{}{}{} ({}){}", checkbox, flag_str, name, code, ping_str);
-
-            let mut style = if is_selected {
-                Style::default().fg(theme.success)
-            } else {
-                theme.subtle_style()
-            };
-
-            if idx == app.lock_modal_cursor {
-                style = style.add_modifier(Modifier::REVERSED | Modifier::BOLD);
-            }
-
-            ListItem::new(text).style(style)
+            build_modal_item(
+                app,
+                theme,
+                code,
+                idx == app.lock_modal_cursor,
+                modal_chunks[0].width,
+            )
         })
         .collect();
 
@@ -682,19 +939,17 @@ pub fn draw_lock_modal(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     list_state.select(Some(app.lock_modal_cursor));
     f.render_stateful_widget(list, modal_chunks[0], &mut list_state);
 
-    let modal_instructions = Line::from(vec![
-        Span::styled(" [Space] ", theme.accent_style()),
-        Span::styled(toggle_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [a] ", theme.accent_style()),
-        Span::styled(all_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [i] ", theme.accent_style()),
-        Span::styled(invert_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [Enter] ", theme.accent_style()),
-        Span::styled(apply_txt, Style::default().fg(Color::Reset)),
-        Span::styled("  [Esc] ", theme.accent_style()),
-        Span::styled(cancel_txt, Style::default().fg(Color::Reset)),
-    ]);
-    let footer_widget = Paragraph::new(modal_instructions);
+    if modal_regions.len() > modal_chunks[0].height as usize && modal_chunks[0].height > 0 {
+        let mut sb_state = ScrollbarState::new(modal_regions.len()).position(app.lock_modal_cursor);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .style(theme.subtle_style());
+        f.render_stateful_widget(scrollbar, modal_chunks[0], &mut sb_state);
+    }
+
     f.render_widget(footer_widget, modal_chunks[1]);
 }
 
@@ -712,6 +967,7 @@ pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
     let summary = app.summary();
     let api_to_aws = api::get_api_to_aws();
+    let lock_badge_style = theme.lock_badge_style();
 
     let format_pick_line = |key: TextKey,
                             pick: Option<&crate::app::BestPick<'_>>,
@@ -736,12 +992,7 @@ pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             };
             let aws_code = api_to_aws.get(best.row.name.as_str()).unwrap_or(&"");
             let is_locked = app.locked.contains(*aws_code);
-            let name_style = if is_locked {
-                theme.accent_style()
-            } else {
-                Style::default().add_modifier(Modifier::BOLD)
-            };
-            let name_span = Span::styled(pad_right(&reg_str, SUMMARY_REGION_WIDTH), name_style);
+            let name_style = Style::default().add_modifier(Modifier::BOLD);
 
             let ping = app.pings.get(*aws_code).copied();
             let (ping_text, ping_color) = if let Some(ms) = ping {
@@ -754,7 +1005,23 @@ pub fn draw_summary(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
                 Style::default().fg(ping_color),
             );
 
-            let mut spans = vec![label_span, time_span, name_span, ping_span];
+            let mut spans = vec![label_span, time_span];
+            if is_locked {
+                let badge = " ●";
+                let used = reg_str.chars().count() + badge.chars().count();
+                let trailing = " ".repeat(SUMMARY_REGION_WIDTH.saturating_sub(used));
+                spans.push(Span::styled(reg_str, name_style));
+                spans.push(Span::styled(badge, lock_badge_style));
+                if !trailing.is_empty() {
+                    spans.push(Span::raw(trailing));
+                }
+            } else {
+                spans.push(Span::styled(
+                    pad_right(&reg_str, SUMMARY_REGION_WIDTH),
+                    name_style,
+                ));
+            }
+            spans.push(ping_span);
 
             if best.similar > 0 {
                 let sim_str = format!(
@@ -801,7 +1068,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // 1. Minimum Floor Guard (< 48 cols or < 12 rows)
     if f.area().width < MIN_WIDTH || f.area().height < MIN_HEIGHT {
-        draw_floor_warning(f, &theme, f.area());
+        draw_floor_warning(f, app.locale, &theme, f.area());
         return;
     }
 
@@ -870,7 +1137,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // 4. Modal overlay (if active)
     if app.show_lock_modal {
-        let modal_area = centered_rect(MODAL_WIDTH_PERCENT, MODAL_HEIGHT_PERCENT, f.area());
+        let modal_area = modal_rect(f.area());
         draw_lock_modal(f, app, &theme, modal_area);
     }
 }
@@ -1670,6 +1937,237 @@ mod tests {
         assert!(
             found_footer,
             "Footer must be rendered at 48x12 minimum floor"
+        );
+    }
+
+    #[test]
+    fn test_modal_shows_confirm_cancel_and_count_on_80x24() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec!["eu-central-1".to_string()],
+            Language::En,
+            None,
+        );
+        app.pings.insert("eu-central-1".to_string(), 32);
+        app.open_lock_modal();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let all_text: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(all_text.contains("(1/15)"), "Modal title must show (1/15)");
+        assert!(all_text.contains("[Enter]"), "Modal must show [Enter]");
+        assert!(all_text.contains("Confirm"), "Modal must show Confirm");
+        assert!(all_text.contains("[Esc]"), "Modal must show [Esc]");
+        assert!(all_text.contains("Cancel"), "Modal must show Cancel");
+        assert!(
+            all_text.contains("eu-central-1"),
+            "Modal must show AWS code"
+        );
+    }
+
+    #[test]
+    fn test_locked_badge_and_footer_truncation() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec!["eu-central-1".to_string()],
+            Language::En,
+            None,
+        );
+        app.queues = vec![api::RegionQueueData::new(
+            "[DE]",
+            "Frankfurt",
+            "Standard",
+            "10s",
+            "6s",
+        )];
+        app.pings.insert("eu-central-1".to_string(), 35);
+        app.notice = Some(crate::app::Notice::error(
+            "Very long network failure message that should truncate gracefully without hiding Quit",
+        ));
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let all_text: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_text.contains("Active (1)"),
+            "Header should show lock count"
+        );
+        assert!(
+            all_text.contains("[DE] Frankfurt ●"),
+            "Locked region should show ● badge"
+        );
+        assert!(
+            all_text.contains("Quit"),
+            "Truncated footer notice must still keep Quit hint visible"
+        );
+        assert!(all_text.contains('…'), "Long notice should truncate with …");
+    }
+
+    #[test]
+    fn test_empty_table_preserves_headers_and_wraps_error() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+        app.is_fetching = false;
+        app.notice = Some(crate::app::Notice::error("timeout"));
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+
+        let all_text: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(
+            all_text.contains("Region"),
+            "Empty state preserves Region header"
+        );
+        assert!(
+            all_text.contains("Ping"),
+            "Empty state preserves Ping header"
+        );
+        assert!(
+            all_text.contains("Failed to load queue data"),
+            "Empty state displays failure message"
+        );
+    }
+
+    #[test]
+    fn test_48x12_scrollbar_does_not_overwrite_killer_and_ru_footer_keeps_quit() {
+        // 1. 48x12 with 15 regions must not overwrite the last column of Killer times
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::En,
+            None,
+        );
+        for &code in &api::get_all_aws_regions() {
+            let name = api::get_aws_to_api().get(code).copied().unwrap_or(code);
+            app.queues.push(api::RegionQueueData::new(
+                "", name, "Standard", "10s", "1:23",
+            ));
+            app.pings.insert(code.to_string(), 40);
+        }
+        let backend = TestBackend::new(48, 12);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let all_en: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_en.contains("1:23"),
+            "Killer queue time 1:23 must not be overwritten by scrollbar at 48x12"
+        );
+
+        // 2. 80x24 Russian with long error notice must keep 'Выход' visible
+        let mut app_ru = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec![],
+            Language::Ru,
+            None,
+        );
+        app_ru.notice = Some(crate::app::Notice::error(
+            "Очень длинное сообщение об ошибке сети которое должно обрезаться",
+        ));
+        let backend_ru = TestBackend::new(80, 24);
+        let mut term_ru = Terminal::new(backend_ru).unwrap();
+        term_ru.draw(|f| draw(f, &mut app_ru)).unwrap();
+        let buf_ru = term_ru.backend().buffer();
+        let footer_ru: String = (0..buf_ru.area.width)
+            .map(|x| buf_ru[(x, 22)].symbol().chars().next().unwrap_or(' '))
+            .collect();
+        assert!(
+            footer_ru.contains("Выход"),
+            "Russian footer at 80x24 must keep 'Выход' visible, got: {}",
+            footer_ru
+        );
+        assert!(
+            footer_ru.contains('…'),
+            "Russian long error notice must truncate cleanly"
+        );
+    }
+
+    #[test]
+    fn test_modal_count_excludes_disabled_locked_regions() {
+        let mut app = App::new(
+            SortOrder::Default,
+            GameMode::Standard,
+            TimeFormat::Exact,
+            vec!["eu-central-1".to_string(), "eu-west-2".to_string()],
+            Language::En,
+            None,
+        );
+        // London (eu-west-2) is disabled, Frankfurt (eu-central-1) is active
+        app.queues = vec![
+            api::RegionQueueData::new("[GB]", "London", "Standard", "—", "—"),
+            api::RegionQueueData::new("[DE]", "Frankfurt", "Standard", "10s", "6s"),
+        ];
+        app.open_lock_modal();
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        let all_text: String = (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol().chars().next().unwrap_or(' '))
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            all_text.contains("(1/14)"),
+            "Modal title must count only visible active regions (1/14), got:\n{}",
+            all_text
         );
     }
 }

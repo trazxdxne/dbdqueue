@@ -113,6 +113,9 @@ pub enum TextKey {
     EventUpcoming,
     EventStartsIn,
     EventIn,
+    FloorTitle,
+    FloorRequiredPrefix,
+    FloorHint,
 }
 
 pub fn tr(locale: Locale, key: TextKey) -> &'static str {
@@ -129,11 +132,11 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ColPing => "Ping",
             TextKey::ColSurvivor => "Survivor",
             TextKey::ColKiller => "Killer",
-            TextKey::FetchingQueues => "  Fetching queue times...",
+            TextKey::FetchingQueues => "Fetching queue times...",
             TextKey::FailedQueues => {
-                "  Failed to load queue data. Check network or proxy. Press 'R' to retry."
+                "Failed to load queue data. Check network or proxy. Press 'R' to retry."
             }
-            TextKey::NoDataForMode => "  No queue data available for this mode.",
+            TextKey::NoDataForMode => "No queue data available for this mode.",
             TextKey::ActionSelect => "Select ",
             TextKey::ActionLock => "Lock ",
             TextKey::ActionSort => "Sort ",
@@ -166,6 +169,9 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::EventUpcoming => "Upcoming",
             TextKey::EventStartsIn => "starts",
             TextKey::EventIn => "in",
+            TextKey::FloorTitle => "Terminal too small",
+            TextKey::FloorRequiredPrefix => "Minimum required: ",
+            TextKey::FloorHint => "Please resize your window or press 'q' to quit",
         },
         Locale::Ru => match key {
             TextKey::HeaderTitle => " Dead By Queue ",
@@ -179,11 +185,11 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::ColPing => "Пинг",
             TextKey::ColSurvivor => "Выживший",
             TextKey::ColKiller => "Маньяк",
-            TextKey::FetchingQueues => "  Загрузка данных очередей...",
+            TextKey::FetchingQueues => "Загрузка данных очередей...",
             TextKey::FailedQueues => {
-                "  Не удалось загрузить данные очередей. Проверьте сеть или прокси. Нажмите 'R' для повтора."
+                "Не удалось загрузить данные очередей. Проверьте сеть или прокси. Нажмите 'R' для повтора."
             }
-            TextKey::NoDataForMode => "  Нет данных для выбранного режима.",
+            TextKey::NoDataForMode => "Нет данных для выбранного режима.",
             TextKey::ActionSelect => "Выбор ",
             TextKey::ActionLock => "Блокировка ",
             TextKey::ActionSort => "Сортировка ",
@@ -216,6 +222,9 @@ pub fn tr(locale: Locale, key: TextKey) -> &'static str {
             TextKey::EventUpcoming => "Ожидается",
             TextKey::EventStartsIn => "начало",
             TextKey::EventIn => "через",
+            TextKey::FloorTitle => "Окно терминала слишком мало",
+            TextKey::FloorRequiredPrefix => "Минимум: ",
+            TextKey::FloorHint => "Увеличьте окно или нажмите 'q' для выхода",
         },
     }
 }

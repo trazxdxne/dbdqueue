@@ -98,7 +98,7 @@ fn main() {
                             regs
                         }
                         None => {
-                            process::exit(1);
+                            process::exit(130);
                         }
                     }
                 } else {
@@ -175,17 +175,6 @@ fn main() {
     let cache_path = cache::get_cache_path(&config_path);
     let ping_cache = cache::load_ping_cache(&cache_path);
     app.pings = ping_cache.pings;
-
-    // Initial fetch to show data immediately
-    if let Ok((mut queues, updated)) = api::fetch_queue_times() {
-        for q in &mut queues {
-            q.reformat(app.time_format);
-        }
-        app.queues = queues;
-        app.api_last_updated = updated;
-        app.is_fetching = false;
-        app.clamp_selection();
-    }
 
     if let Err(e) = tui::run_app(app, config_path) {
         eprintln!("Error running TUI: {}", e);

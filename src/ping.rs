@@ -1,7 +1,6 @@
 use ratatui::style::Color;
 use std::collections::HashMap;
 use std::net::{TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
@@ -43,24 +42,20 @@ pub fn ping_aws_region(region_code: &str, timeout: Duration) -> Option<u32> {
 
 pub fn measure_all_regions_ping() -> HashMap<String, u32> {
     let regions = crate::api::get_all_aws_regions();
-    let results = Arc::new(Mutex::new(HashMap::new()));
+    let timeout = Duration::from_millis(2500);
 
     std::thread::scope(|s| {
-        for reg in &regions {
-            let reg_str = reg.to_string();
-            let results_clone = Arc::clone(&results);
-            s.spawn(move || {
-                let timeout = Duration::from_millis(2500);
-                if let Some(ms) = ping_aws_region(&reg_str, timeout)
-                    && let Ok(mut map) = results_clone.lock()
-                {
-                    map.insert(reg_str, ms);
-                }
-            });
-        }
-    });
+        let handles: Vec<_> = regions
+            .into_iter()
+            .map(|reg| s.spawn(move || ping_aws_region(reg, timeout).map(|ms| (reg, ms))))
+            .collect();
 
-    results.lock().unwrap().clone()
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok().flatten())
+            .map(|(reg, ms)| (reg.to_string(), ms))
+            .collect()
+    })
 }
 
 pub fn color_for_ping(ms: Option<u32>) -> Color {

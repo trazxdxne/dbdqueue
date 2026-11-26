@@ -1,5 +1,5 @@
 use crate::api::get_all_aws_regions;
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers, MouseEventKind};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::fs;
 use std::io;
@@ -18,13 +18,30 @@ pub const HOSTS_PATH: &str = "C:\\Windows\\System32\\drivers\\etc\\hosts";
 pub const HOSTS_PATH: &str = "/etc/hosts";
 
 fn is_russian() -> bool {
-    let lang = std::env::var("LANG").unwrap_or_default().to_lowercase();
-    let lc_all = std::env::var("LC_ALL").unwrap_or_default().to_lowercase();
-    let lc_msg = std::env::var("LC_MESSAGES")
-        .unwrap_or_default()
-        .to_lowercase();
+    crate::i18n::resolve_locale(crate::config::Language::Auto) == crate::i18n::Locale::Ru
+}
 
-    lang.starts_with("ru") || lc_all.starts_with("ru") || lc_msg.starts_with("ru")
+fn log_ok(verbose: bool, is_ru: bool, ru: &str, en: &str) {
+    if verbose {
+        println!("\x1b[92m{}\x1b[0m", if is_ru { ru } else { en });
+    }
+}
+
+fn log_warn(verbose: bool, is_ru: bool, ru: &str, en: &str) {
+    if verbose {
+        println!("\x1b[93m{}\x1b[0m", if is_ru { ru } else { en });
+    }
+}
+
+fn log_err(verbose: bool, is_ru: bool, ru: &str, en: &str, detail: &str) {
+    if verbose {
+        let msg = if is_ru { ru } else { en };
+        if detail.is_empty() {
+            eprintln!("\x1b[91m{}\x1b[0m", msg);
+        } else {
+            eprintln!("\x1b[91m{}\x1b[0m {}", msg, detail);
+        }
+    }
 }
 
 pub fn build_hosts_content(
@@ -115,14 +132,14 @@ pub enum UpdateHostsResult {
 /// In PowerShell, a single quote within a single-quoted string is represented as ''.
 /// When nested inside another single-quoted string, each quote must be doubled again ('''').
 #[cfg(any(windows, test))]
-#[allow(dead_code)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn escape_powershell_single_quotes(s: &str) -> String {
     s.replace('\'', "''''")
 }
 
 /// Constructs the elevated PowerShell command string for copying hosts file on Windows.
 #[cfg(any(windows, test))]
-#[allow(dead_code)]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn build_windows_elevation_command(src: &Path, dst: &Path) -> String {
     let escaped_src = escape_powershell_single_quotes(&src.to_string_lossy());
     let escaped_dst = escape_powershell_single_quotes(&dst.to_string_lossy());
@@ -140,55 +157,48 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     let new_content = match build_hosts_content(hosts_path, selected_aws_regions) {
         Ok(content) => content,
         Err(e) => {
-            let err_msg = format!("{}", e);
-            if verbose {
-                let err_hdr = if is_ru {
-                    "Ошибка создания содержимого hosts:"
-                } else {
-                    "Error generating hosts file content:"
-                };
-                eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-            }
+            let err_msg = e.to_string();
+            log_err(
+                verbose,
+                is_ru,
+                "Ошибка создания содержимого hosts:",
+                "Error generating hosts file content:",
+                &err_msg,
+            );
             return UpdateHostsResult::Error(err_msg);
         }
     };
 
     let current_content = fs::read_to_string(hosts_path).unwrap_or_default();
     if current_content == new_content {
-        if verbose {
-            let msg = if is_ru {
-                "Файл hosts уже актуален."
-            } else {
-                "Hosts file is already up to date."
-            };
-            println!("\x1b[92m{}\x1b[0m", msg);
-        }
+        log_ok(
+            verbose,
+            is_ru,
+            "Файл hosts уже актуален.",
+            "Hosts file is already up to date.",
+        );
         return UpdateHostsResult::AlreadyUpToDate;
     }
 
     // Try to write directly (succeeds if running as Administrator)
     if fs::write(hosts_path, &new_content).is_ok() {
-        if verbose {
-            let msg = if is_ru {
-                "Блокировка регионов успешно обновлена!"
-            } else {
-                "Successfully updated region locks!"
-            };
-            println!("\x1b[92m{}\x1b[0m", msg);
-        }
+        log_ok(
+            verbose,
+            is_ru,
+            "Блокировка регионов успешно обновлена!",
+            "Successfully updated region locks!",
+        );
         flush_dns_cache();
         return UpdateHostsResult::Updated;
     }
 
     // If writing fails, write to a temp file in AppConfig directory first
-    if verbose {
-        let req_msg = if is_ru {
-            "Запрос прав Администратора для изменения файла hosts..."
-        } else {
-            "Requesting Administrator access to write to hosts file..."
-        };
-        println!("\x1b[93m{}\x1b[0m", req_msg);
-    }
+    log_warn(
+        verbose,
+        is_ru,
+        "Запрос прав Администратора для изменения файла hosts...",
+        "Requesting Administrator access to write to hosts file...",
+    );
 
     let config_path = crate::config::get_config_path();
     let temp_path = config_path.with_file_name("hosts.tmp");
@@ -197,15 +207,14 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     }
 
     if let Err(e) = fs::write(&temp_path, &new_content) {
-        let err_msg = format!("{}", e);
-        if verbose {
-            let err_hdr = if is_ru {
-                "Не удалось создать временный файл hosts:"
-            } else {
-                "Failed to create temporary hosts file:"
-            };
-            eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-        }
+        let err_msg = e.to_string();
+        log_err(
+            verbose,
+            is_ru,
+            "Не удалось создать временный файл hosts:",
+            "Failed to create temporary hosts file:",
+            &err_msg,
+        );
         return UpdateHostsResult::Error(err_msg);
     }
 
@@ -224,25 +233,22 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
         .unwrap_or(false);
 
     if status.map(|s| s.success()).unwrap_or(false) && hosts_updated {
-        if verbose {
-            let msg = if is_ru {
-                "Блокировка регионов успешно обновлена!"
-            } else {
-                "Successfully updated region locks!"
-            };
-            println!("\x1b[92m{}\x1b[0m", msg);
-        }
+        log_ok(
+            verbose,
+            is_ru,
+            "Блокировка регионов успешно обновлена!",
+            "Successfully updated region locks!",
+        );
         flush_dns_cache();
         UpdateHostsResult::Updated
     } else {
-        if verbose {
-            let err_msg = if is_ru {
-                "Не удалось обновить файл hosts: в повышении прав отказано или произошла ошибка."
-            } else {
-                "Failed to update hosts file: elevation denied or failed."
-            };
-            eprintln!("\x1b[91m{}\x1b[0m", err_msg);
-        }
+        log_err(
+            verbose,
+            is_ru,
+            "Не удалось обновить файл hosts: в повышении прав отказано или произошла ошибка.",
+            "Failed to update hosts file: elevation denied or failed.",
+            "",
+        );
         UpdateHostsResult::ElevationFailed
     }
 }
@@ -254,43 +260,38 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     let new_content = match build_hosts_content(hosts_path, selected_aws_regions) {
         Ok(content) => content,
         Err(e) => {
-            let err_msg = format!("{}", e);
-            if verbose {
-                let err_hdr = if is_ru {
-                    "Ошибка создания содержимого hosts:"
-                } else {
-                    "Error generating hosts file content:"
-                };
-                eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-            }
+            let err_msg = e.to_string();
+            log_err(
+                verbose,
+                is_ru,
+                "Ошибка создания содержимого hosts:",
+                "Error generating hosts file content:",
+                &err_msg,
+            );
             return UpdateHostsResult::Error(err_msg);
         }
     };
 
     let current_content = fs::read_to_string(hosts_path).unwrap_or_default();
     if current_content == new_content {
-        if verbose {
-            let msg = if is_ru {
-                "Файл hosts уже актуален."
-            } else {
-                "Hosts file is already up to date."
-            };
-            println!("\x1b[92m{}\x1b[0m", msg);
-        }
+        log_ok(
+            verbose,
+            is_ru,
+            "Файл hosts уже актуален.",
+            "Hosts file is already up to date.",
+        );
         return UpdateHostsResult::AlreadyUpToDate;
     }
 
     // Attempt direct write first (succeeds when running with root/sudo or write permissions)
     match fs::write(hosts_path, &new_content) {
         Ok(()) => {
-            if verbose {
-                let msg = if is_ru {
-                    "Блокировка регионов успешно обновлена!"
-                } else {
-                    "Successfully updated region locks!"
-                };
-                println!("\x1b[92m{}\x1b[0m", msg);
-            }
+            log_ok(
+                verbose,
+                is_ru,
+                "Блокировка регионов успешно обновлена!",
+                "Successfully updated region locks!",
+            );
             flush_dns_cache();
             return UpdateHostsResult::Updated;
         }
@@ -298,27 +299,24 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
             // Need elevation, continue to pkexec
         }
         Err(e) => {
-            let err_msg = format!("{}", e);
-            if verbose {
-                let err_hdr = if is_ru {
-                    "Ошибка записи в файл hosts:"
-                } else {
-                    "Error writing to hosts file:"
-                };
-                eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-            }
+            let err_msg = e.to_string();
+            log_err(
+                verbose,
+                is_ru,
+                "Ошибка записи в файл hosts:",
+                "Error writing to hosts file:",
+                &err_msg,
+            );
             return UpdateHostsResult::Error(err_msg);
         }
     }
 
-    if verbose {
-        let req_msg = if is_ru {
-            "Запрос прав root для изменения /etc/hosts..."
-        } else {
-            "Requesting write access to /etc/hosts..."
-        };
-        println!("\x1b[93m{}\x1b[0m", req_msg);
-    }
+    log_warn(
+        verbose,
+        is_ru,
+        "Запрос прав root для изменения /etc/hosts...",
+        "Requesting write access to /etc/hosts...",
+    );
 
     let mut child = match Command::new("pkexec")
         .args(["tee", HOSTS_PATH])
@@ -329,15 +327,14 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     {
         Ok(child) => child,
         Err(e) => {
-            let err_msg = format!("{}", e);
-            if verbose {
-                let err_hdr = if is_ru {
-                    "Ошибка запуска pkexec:"
-                } else {
-                    "Error executing pkexec:"
-                };
-                eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-            }
+            let err_msg = e.to_string();
+            log_err(
+                verbose,
+                is_ru,
+                "Ошибка запуска pkexec:",
+                "Error executing pkexec:",
+                &err_msg,
+            );
             return UpdateHostsResult::Error(err_msg);
         }
     };
@@ -345,29 +342,26 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
     if let Some(mut stdin) = child.stdin.take()
         && let Err(e) = stdin.write_all(new_content.as_bytes())
     {
-        let err_msg = format!("{}", e);
-        if verbose {
-            let err_hdr = if is_ru {
-                "Ошибка записи в stdin pkexec:"
-            } else {
-                "Error writing to pkexec stdin:"
-            };
-            eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-        }
+        let err_msg = e.to_string();
+        log_err(
+            verbose,
+            is_ru,
+            "Ошибка записи в stdin pkexec:",
+            "Error writing to pkexec stdin:",
+            &err_msg,
+        );
         return UpdateHostsResult::Error(err_msg);
     }
 
     match child.wait_with_output() {
         Ok(output) => {
             if output.status.success() {
-                if verbose {
-                    let msg = if is_ru {
-                        "Блокировка регионов успешно обновлена!"
-                    } else {
-                        "Successfully updated region locks!"
-                    };
-                    println!("\x1b[92m{}\x1b[0m", msg);
-                }
+                log_ok(
+                    verbose,
+                    is_ru,
+                    "Блокировка регионов успешно обновлена!",
+                    "Successfully updated region locks!",
+                );
                 flush_dns_cache();
                 UpdateHostsResult::Updated
             } else {
@@ -395,15 +389,14 @@ pub fn update_hosts(selected_aws_regions: Option<&[String]>, verbose: bool) -> U
             }
         }
         Err(e) => {
-            let err_msg = format!("{}", e);
-            if verbose {
-                let err_hdr = if is_ru {
-                    "Ошибка ожидания pkexec:"
-                } else {
-                    "Error waiting for pkexec:"
-                };
-                eprintln!("\x1b[91m{}\x1b[0m {}", err_hdr, err_msg);
-            }
+            let err_msg = e.to_string();
+            log_err(
+                verbose,
+                is_ru,
+                "Ошибка ожидания pkexec:",
+                "Error waiting for pkexec:",
+                &err_msg,
+            );
             UpdateHostsResult::Error(err_msg)
         }
     }
@@ -426,7 +419,7 @@ pub fn flush_dns_cache() {
             .stderr(Stdio::null())
             .status();
 
-        if res.is_ok() {
+        if res.is_ok_and(|s| s.success()) {
             return;
         }
 
@@ -489,69 +482,63 @@ pub fn interactive_lock_menu(current_locked: &[String]) -> Option<Vec<String>> {
     loop {
         terminal
             .draw(|f| {
-                let modal_area = if f.area().width <= 80 || f.area().height <= 24 {
-                    f.area()
+                if f.area().width < crate::ui::MIN_WIDTH || f.area().height < crate::ui::MIN_HEIGHT
+                {
+                    crate::ui::draw_floor_warning(f, app.locale, &theme, f.area());
                 } else {
-                    crate::ui::centered_rect(70, 80, f.area())
-                };
-                crate::ui::draw_lock_modal(f, &app, &theme, modal_area);
+                    let modal_area = crate::ui::modal_rect(f.area());
+                    crate::ui::draw_lock_modal(f, &app, &theme, modal_area);
+                }
             })
             .ok();
 
         match event::read() {
             Ok(Event::Key(key)) => {
-                if key.kind != crossterm::event::KeyEventKind::Press {
+                if key.kind != crossterm::event::KeyEventKind::Press
+                    && key.kind != crossterm::event::KeyEventKind::Repeat
+                {
                     continue;
                 }
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && matches!(key.code, KeyCode::Char('c') | KeyCode::Char('C'))
+                {
+                    cancelled = true;
+                    break;
+                }
                 match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        app.lock_modal_up();
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        app.lock_modal_down();
-                    }
-                    KeyCode::Home => {
-                        app.handle_home();
-                    }
-                    KeyCode::End => {
-                        app.handle_end();
-                    }
-                    KeyCode::PageUp => {
-                        app.handle_page_up();
-                    }
-                    KeyCode::PageDown => {
-                        app.handle_page_down();
-                    }
-                    KeyCode::Char(' ') => {
-                        app.lock_modal_toggle();
-                    }
-                    KeyCode::Char('a')
-                    | KeyCode::Char('A')
-                    | KeyCode::Char('ф')
-                    | KeyCode::Char('Ф') => {
-                        app.lock_modal_select_all();
-                    }
-                    KeyCode::Char('i')
-                    | KeyCode::Char('I')
-                    | KeyCode::Char('ш')
-                    | KeyCode::Char('Ш') => {
-                        app.lock_modal_invert();
-                    }
+                    KeyCode::Up => app.handle_up(),
+                    KeyCode::Down => app.handle_down(),
+                    KeyCode::Home => app.handle_home(),
+                    KeyCode::End => app.handle_end(),
+                    KeyCode::PageUp => app.handle_page_up(),
+                    KeyCode::PageDown => app.handle_page_down(),
                     KeyCode::Enter => {
                         applied = true;
                         break;
                     }
-                    KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('й') => {
+                    KeyCode::Esc => {
                         cancelled = true;
                         break;
                     }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        cancelled = true;
-                        break;
+                    KeyCode::Char(c)
+                        if !key
+                            .modifiers
+                            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+                    {
+                        app.handle_key(c);
+                        if !app.show_lock_modal {
+                            cancelled = true;
+                            break;
+                        }
                     }
                     _ => {}
                 }
             }
+            Ok(Event::Mouse(mouse)) => match mouse.kind {
+                MouseEventKind::ScrollUp => app.handle_up(),
+                MouseEventKind::ScrollDown => app.handle_down(),
+                _ => {}
+            },
             Ok(Event::Resize(_, _)) => {
                 // Buffer resize handled automatically by Ratatui on next draw
             }
