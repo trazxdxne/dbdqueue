@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-11-26
+
+### Added
+- Mouse wheel scroll support (`ScrollUp`/`ScrollDown`) in both the main queue table and region lock modal.
+- Vertical scrollbars for overflowing table and region lock modal lists.
+- Locked region indicator (`●`) in table rows and the Best Pick summary card, plus active lock counts in the header (`Active (N)`) and modal title (`(selected/total)`).
+
+### Changed
+- Instant non-blocking TUI startup without duplicate synchronous API requests before entering the alternate screen.
+- Responsive header, footer, and Region Locker modal wrapping/truncation across narrow (`48x12`), standard (`80x24`), and Russian-locale terminals.
+- Aligned, ping-colored region rows inside the Region Locker modal and highlighted active sort column headers.
+- Refactored ping measurement to use `std::thread::scope` without `Arc<Mutex<_>>`, cached API URL resolution, and reused locale/key-normalization helpers across modules.
+
+### Fixed
+- Fixed `is_fetching` remaining stuck `true` when initial API fetch failed (which blocked `'R'` retry), and prevented background auto-refresh from prematurely clearing manual refresh state.
+- Fixed Linux `flush_dns_cache` checking `resolvectl` exit status before falling back to `systemd-resolve`.
+
 ## [0.10.1] - 2026-10-31
 
 ### Changed
